@@ -1,8 +1,8 @@
 {
   "stride_m": 1.0,
-  "stand_point": "Location 2: facing along the crosswalk; paced 2026-10-25",
-  "start of crosswalk": {"forward": 8, "right": 0},
-  "end of crosswalk": {"forward": 24, "right": 0},
+  "stand_point": "Location 2: in the curb lane facing along the street; the crosswalk crosses left to right ahead; paced 2026-10-25",
+  "crosswalk paint near edge (people walk left-right on it)": {"forward": 8, "right": 0},
+  "crosswalk paint far edge": {"forward": 24, "right": 0},
   "front of red car behind": {"forward": -12, "right": 0},
   "left edge of street": {"forward": 0, "right": -14}
 }
