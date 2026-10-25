@@ -122,7 +122,7 @@ async function loadSite(id) {
   setTarget(null);
   scene.setSite(S.site);
   showZones();
-  showFootage();
+  showFootage().then(ensureIllustrated);
   cams.setCameras(S.rig, S.media);
   cams.clearScores();
   cams.setRound(S.site ? S.site.round ?? 0 : null, { done: (S.site?.round ?? 0) > 0 });
@@ -170,7 +170,7 @@ async function scan() {
         const r = await fetch(`/api/sites/${id}/ingest`, { method: 'POST' });
         if (r.ok) {
           const j = await r.json();
-          if (j.cameras) { S.media = j.cameras; cams.setMedia(j.cameras); showFootage(); }
+          if (j.cameras) { S.media = j.cameras; cams.setMedia(j.cameras); showFootage().then(ensureIllustrated); }
           panel.log('log', { message: `ingest: ${j.cameras?.length ?? 0} cameras transcoded` });
         } else panel.log('log', { message: `ingest: HTTP ${r.status}${r.status === 501 ? ' (not implemented yet)' : ''}` });
       } catch (err) { panel.log('log', { message: `ingest failed: ${err.message}` }); }
@@ -434,12 +434,34 @@ async function video() {
 }
 
 // ---------------------------------------------------------------- target
-// Photo mode needs the transcoded keyframes; falls back to the model look.
+// Look of the 3D world: 'illustrated' (image-model redraw of each camera
+// frame, projected), 'photo' (raw footage projected) or 'model'.
+let LOOK = (() => { try { return localStorage.getItem('flyme.look'); } catch { return null; } })() ?? 'illustrated';
 async function showFootage() {
-  const ok = await scene.setFootage(S.rig, S.media, S.site?.camera_horizons).catch(() => false);
-  const on = ok && $('btn-photo').classList.contains('on');
-  scene.setPhoto(on);
-  $('btn-photo').disabled = !ok;
+  const hasIllus = S.media.some((m) => m.illustrated_url);
+  const hasPhoto = S.media.some((m) => m.keyframe_url);
+  let look = LOOK;
+  if (look === 'illustrated' && !hasIllus) look = hasPhoto ? 'photo' : 'model';
+  if (look === 'photo' && !hasPhoto) look = 'model';
+  const media = S.media.map((m) => ({ id: m.id, keyframe_url: look === 'illustrated' ? m.illustrated_url : m.keyframe_url }));
+  const ok = look !== 'model' && await scene.setFootage(S.rig, media, S.site?.camera_horizons).catch(() => false);
+  scene.setPhoto(Boolean(ok), { look });
+  for (const b of $('look').querySelectorAll('button')) {
+    b.classList.toggle('on', b.dataset.look === (ok ? look : 'model'));
+    b.disabled = (b.dataset.look === 'illustrated' && !hasIllus) || (b.dataset.look === 'photo' && !hasPhoto);
+  }
+}
+
+// Ask the server for illustrated frames (cached; ~20 s the first time).
+async function ensureIllustrated() {
+  if (!S.siteId || !S.media.some((m) => m.keyframe_url) || S.media.every((m) => m.illustrated_url)) return;
+  try {
+    const r = await fetch(`/api/sites/${encodeURIComponent(S.siteId)}/illustrate`, { method: 'POST' });
+    if (!r.ok) return;
+    const { cameras } = await r.json();
+    for (const c of cameras) { const m = S.media.find((x) => x.id === c.id); if (m && c.url) m.illustrated_url = c.url; }
+    showFootage();
+  } catch { /* visual only */ }
 }
 
 function showZones() {
@@ -537,8 +559,10 @@ if (params.get('target')) {
   if (Number.isFinite(f) && Number.isFinite(r)) setTarget({ forward: f, right: r });
 }
 
-$('btn-photo').addEventListener('click', (e) => {
-  const b = e.currentTarget;
-  b.classList.toggle('on');
-  scene.setPhoto(b.classList.contains('on'));
+$('look').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-look]');
+  if (!b || b.disabled) return;
+  LOOK = b.dataset.look;
+  try { localStorage.setItem('flyme.look', LOOK); } catch { /* per-viewer convenience */ }
+  showFootage();
 });

@@ -77,12 +77,16 @@ function cameraSource(siteId, cam) {
   return null;
 }
 
+function hasIngested(siteId, cam) {
+  const dir = path.join(SITES_DIR, siteId);
+  return fs.existsSync(path.join(dir, `${cam.id}.mp4`)) && fs.existsSync(path.join(dir, 'frames', `${cam.id}.png`));
+}
+
 function siteInfo(siteId) {
   const dir = path.join(SITES_DIR, siteId);
   const rig = readRig(siteId);
-  const present = fs.existsSync(dir) ? rig.cameras.filter((c) => cameraSource(siteId, c)) : [];
-  const ingested = present.length > 0 && present.every((c) =>
-    fs.existsSync(path.join(dir, `${c.id}.mp4`)) && fs.existsSync(path.join(dir, 'frames', `${c.id}.png`)));
+  const present = fs.existsSync(dir) ? rig.cameras.filter((c) => cameraSource(siteId, c) || hasIngested(siteId, c)) : [];
+  const ingested = present.length > 0 && present.every((c) => hasIngested(siteId, c));
   const site = latestSite(siteId);
   return {
     id: siteId,
@@ -119,8 +123,15 @@ app.get('/api/sites/:id', (req, res) => {
     id: c.id,
     mp4_url: fs.existsSync(path.join(dir, `${c.id}.mp4`)) ? `/media/${id}/${c.id}.mp4` : null,
     keyframe_url: fs.existsSync(path.join(dir, 'frames', `${c.id}.png`)) ? `/media/${id}/frames/${c.id}.png` : null,
+    illustrated_url: fs.existsSync(path.join(dir, 'frames', `${c.id}.illustrated.png`)) ? `/media/${id}/frames/${c.id}.illustrated.png` : null,
   }));
   res.json({ ...info, rig: readRig(id), site: latestSite(id), camera_media: cameras });
+});
+
+// Illustrated textures (visual only) for the 3D world; cached per keyframe.
+app.post('/api/sites/:id/illustrate', async (req, res) => {
+  const illustrate = await need(res, 'illustrate', 'illustrate');
+  if (illustrate) res.json(await illustrate({ siteId: req.params.id, rig: readRig(req.params.id) }));
 });
 
 // ---------------------------------------------------------------- A. ingest

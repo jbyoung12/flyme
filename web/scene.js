@@ -75,9 +75,23 @@ export function createScene(container, { onTap } = {}) {
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   // Photo mode: real footage projected onto the ground + a 360° backdrop.
   const photo = createFootageProjection(scene, { bg: BG });
-  function setPhoto(on) {
+  let photoLook = 'model';
+  // Projected looks put the obstacles in a soft architectural-clay finish so
+  // they sit in the picture; people keep their hazard amber.
+  const CLAY = new THREE.Color('#ece8e0');
+  function setPhoto(on, { look = 'photo' } = {}) {
     photo.setVisible(on);
-    siteGroup?.traverse((o) => { if (o.userData.surface) o.visible = !on; });
+    siteGroup?.traverse((o) => {
+      if (o.userData.surface) o.visible = !on;
+      const m = o.material;
+      if (!m?.color || !o.isMesh || o.userData.noClay) return;
+      const ob = o.parent?.userData?.obstacle ?? o.userData.obstacle;
+      if (!ob || ob.type === 'person' || ob.type === 'wire') return;
+      m.userData.baseColor ??= m.color.clone();
+      m.color.copy(on ? CLAY : m.userData.baseColor);
+      if ('roughness' in m) m.roughness = on ? 0.85 : 0.55;
+    });
+    photoLook = on ? look : 'model';
     grid.material.opacity = on ? 0.25 : 0.7;
     scene.fog.near = on ? 120 : 55;
     scene.fog.far = on ? 400 : 150;
@@ -228,6 +242,7 @@ export function createScene(container, { onTap } = {}) {
       obstacles.push(e);
     }
     setObstacleTime(0);
+    if (photo.visible) setPhoto(true, { look: photoLook });
   }
 
   function setObstacleTime(t) {
