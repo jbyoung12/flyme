@@ -2,6 +2,8 @@
 
 > **Your flying car looks around with its own cameras, rebuilds the street in 3D, checks the rebuild against the footage, and won't hop until a simulation proves the landing is safe.**
 
+**Try it live:** https://flyme-111809628719.us-west1.run.app (add `?replay=1` to watch a cached run instantly)
+
 Built live at the **Gemini 4 Argon SF Hackathon (Shack15, Sunday 2026-10-25)** for **Problem Statement 2: "More Dimensions"** (*"Build a system that renders what it made, watches the result, critiques it against the goal, and fixes it in a loop"*) and **Best Use of Managed Agents**.
 
 ---
