@@ -4,6 +4,7 @@
 // footage. Zero dependencies (runs in Node 22 and the browser).
 
 import { simulate } from './physics.js';
+import { prepareObstacles } from './geometry.js';
 
 // Route shapes, ordered roughly from cheapest/likeliest to exotic so an
 // early-exit search (reachability map) usually stops within a few sims.
@@ -34,12 +35,12 @@ export function margins(sim) {
 // Full search to one target. Returns { safe: [{params, sim, margins}], near: [...] }
 // where `near` holds the least-bad UNSAFE routes (fewest failures) for REJECT
 // explanations.
-export function searchRoutes(site, target, { shapes = shapeGrid() } = {}) {
+export function searchRoutes(site, target, { shapes = shapeGrid(), preparedObstacles = prepareObstacles(site) } = {}) {
   const safe = [];
   const near = [];
   for (const s of shapes) {
     const params = { target, ...s };
-    const sim = simulate(site, params);
+    const sim = simulate(site, params, { preparedObstacles });
     const entry = { params: sim.params ?? params, sim, margins: margins(sim) };
     if (sim.verdict === 'SAFE') safe.push(entry);
     else near.push(entry);
@@ -71,10 +72,10 @@ export function diverseSafe(safe, n = 4) {
 }
 
 // Is any SAFE route to `target`? Early exit on the first one (map cells).
-export function reachable(site, target, shapes = shapeGrid({ full: false })) {
+export function reachable(site, target, shapes = shapeGrid({ full: false }), preparedObstacles = prepareObstacles(site)) {
   let best = null;
   for (const s of shapes) {
-    const sim = simulate(site, { target, ...s });
+    const sim = simulate(site, { target, ...s }, { preparedObstacles });
     if (sim.verdict === 'SAFE') return { safe: true, air_remaining_kg: +sim.air.remaining_kg.toFixed(0) };
     if (!best || sim.failures.length < best.failures.length) best = sim;
   }

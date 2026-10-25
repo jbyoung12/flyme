@@ -16,27 +16,41 @@ import { esc, fmt, failReason } from './format.js';
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const MOCK = params.get('mock') === '1';
+const VIDEO = params.get('video') === '1'; // photoreal-video stretch (web/video-panel.js), hidden by default
 const MOCK_SPEED = Number(params.get('speed') ?? 1) || 1;
 
 const S = {
   siteId: null, rig: DEFAULT_RIG, site: null, media: [],
   target: null,
   rounds: [], cands: new Map(), selectedKey: null, chosenKey: null, result: null,
-  busy: null, mode: 'search', replay: params.get('replay') === '1', usedMock: MOCK,
+  // One planner in the UI: "search" = simulator search + Managed Agent. ?mode=quick|agent|local is a hidden dev override.
+  busy: null, mode: ['search', 'quick', 'agent', 'local'].includes(params.get('mode')) ? params.get('mode') : 'search', replay: params.get('replay') === '1', usedMock: MOCK,
+  statusMsg: '', planError: null, suggestion: null, landed: false,
 };
 
 // ---------------------------------------------------------------- modules
 const scene = createScene($('view'), { onTap });
 const cams = createCams({ tilesEl: $('tiles'), modeEl: $('cam-mode'), blendEl: $('blend'), roundEl: $('recon-round'), lightboxEl: $('lightbox') });
 const panel = createPanel({
-  bannerEl: $('plan-banner'), validEl: $('valid-banner'), verdictEl: $('verdict'), titleEl: $('arc-title'),
+  cardEl: $('card'), kickerEl: $('card-kicker'), bannerEl: $('plan-banner'), whyEl: $('why'), whyMoreEl: $('why-more'),
+  progressEl: $('progress'), activityEl: $('activity'), keynumsEl: $('keynums'), validEl: $('valid-banner'),
+  verdictEl: $('verdict'), titleEl: $('arc-title'),
   checklistEl: $('checklist'), airEl: $('air'), roundsEl: $('rounds'), logEl: $('log'),
   onSelect: (key) => select(key, { replay: true }),
 });
 window.flyme = { state: S, scene, renderCameraViews }; // debugging + T5a hook
 
 // ---------------------------------------------------------------- small helpers
-const status = (msg) => { $('status').textContent = msg; };
+// Progress / outcome line shown above the primary button.
+const status = (msg) => { S.statusMsg = msg ?? ''; updateButtons(); };
+const siteInfo = () => {
+  const ob = S.site?.obstacles ?? [];
+  if (!S.site) { $('status').textContent = 'Not scanned yet'; return; }
+  const people = ob.filter((o) => o.type === 'person').length;
+  const moving = ob.filter((o) => o.velocity && (o.velocity.forward || o.velocity.right)).length;
+  const r = S.site.round ?? 0;
+  $('status').innerHTML = `${ob.length} obstacles · ${people} ${people === 1 ? 'person' : 'people'} · ${moving} moving${r ? ` · <span class="ok">✓ verified in ${r} round${r === 1 ? '' : 's'}</span>` : ''}`;
+};
 const lastOf = (events, type) => [...events].reverse().find((e) => e.type === type);
 const withReplay = (url) => (S.replay ? `${url}${url.includes('?') ? '&' : '?'}replay=1` : url);
 
@@ -47,17 +61,91 @@ function pills() {
   $('pills').innerHTML = p.join('');
 }
 
+// ---------------------------------------------------------------- guided flow
+// One primary action whose label follows the step; small secondary actions.
+const canScan = () => !S.busy && Boolean(S.siteId);
+const canPlan = () => !S.busy && Boolean(S.site) && Boolean(S.target);
+const canHop = () => !S.busy && !S.landed && S.result?.verdict === 'SAFE' && Boolean(S.cands.get(S.chosenKey));
+
+function primaryAction() {
+  if (S.busy === 'scan') return { label: 'Scanning street…', busy: true };
+  if (S.busy === 'plan') return { label: 'Planning flight…', busy: true };
+  if (S.busy === 'hop') return { label: 'Flying…', busy: true };
+  if (!S.site) return { label: 'Scan this street', run: scan, kind: 'go' };
+  if (S.landed) return { label: 'Pick a new spot', run: newSpot, kind: 'neutral' };
+  if (canHop()) return { label: 'Fly!', run: hop, kind: 'hop' };
+  if (S.result) return S.suggestion ? { ...S.suggestion, kind: 'suggest' } : { label: 'Pick another spot', run: newSpot, kind: 'neutral' };
+  if (!S.target) return { label: 'Tap the ground where you want to land', disabled: true };
+  if (S.planError) return { label: 'Try planning again', run: () => plan(), kind: 'go' };
+  return { label: 'Plan flight to here', run: () => plan(), kind: 'go' };
+}
+
+function hintText() {
+  if (S.busy) return S.statusMsg || 'Working…';
+  if (!S.site) return 'This street hasn\'t been scanned yet — the car\'s 4 cameras will rebuild it in 3D.';
+  if (S.landed) return S.statusMsg;
+  if (!S.target) return ''; // the action button already says it
+  if (S.result?.verdict === 'SAFE') return 'Our simulator verified this flight path. Fly before the plan goes stale.';
+  if (S.result) return S.suggestion ? 'No safe flight path to that exact spot — try the suggestion, or tap a new spot.' : 'No safe flight path to that spot — tap somewhere else.';
+  if (S.planError) return 'The planner hit a problem.';
+  return '';
+}
+
+function stepStates() {
+  const st = { scan: 'todo', pick: 'todo', plan: 'todo', hop: 'todo' };
+  if (S.busy === 'scan' || !S.site) { st.scan = 'current'; return st; }
+  st.scan = 'done';
+  if (!S.target) { st.pick = 'current'; return st; }
+  st.pick = 'done';
+  if (S.landed) return { ...st, plan: 'done', hop: 'done' };
+  if (S.busy === 'hop' || canHop()) return { ...st, plan: 'done', hop: 'current' };
+  st.plan = S.result && !S.busy ? 'warn' : 'current';
+  return st;
+}
+
+function idleCard() {
+  if (S.busy || S.result || S.planError || S.landed) return;
+  if (!S.site) panel.banner('idle', 'Not scanned yet', 'Scan the street: Argon rebuilds it in 3D from the car\'s 4 camera clips, then checks its rebuild against the footage.', { kicker: 'Step 1' });
+  else if (!S.target) panel.banner('idle', 'Where to?', 'Tap the ground in the 3D street to choose a landing spot. Green tiles are clear ground.', { kicker: 'Step 2' });
+  else panel.banner('idle', 'Ready to plan', 'Our simulator checks every candidate flight path (collisions, people, thrust, air, touchdown). Only a SAFE path can fly.', { kicker: 'Step 3' });
+}
+
 function updateButtons() {
   const b = S.busy;
-  const chosen = S.cands.get(S.chosenKey);
-  $('btn-scan').disabled = Boolean(b) || !S.siteId;
-  $('btn-plan').disabled = Boolean(b) || !S.site;
-  $('btn-hop').disabled = Boolean(b) || !chosen || S.result?.verdict !== 'SAFE';
-  $('btn-video').disabled = Boolean(b) || !chosen || S.result?.verdict !== 'SAFE';
+  const a = primaryAction();
+  const btn = $('btn-primary');
+  btn.querySelector('.txt').textContent = a.label;
+  btn.className = `primary-btn ${a.kind ?? ''}${a.busy ? ' busy' : ''}`;
+  btn.disabled = Boolean(a.busy || a.disabled || !a.run);
+  btn.onclick = a.run ? () => a.run() : null;
+  const hint = hintText();
+  $('hint').textContent = hint;
+  $('hint').hidden = !hint;
+  $('hint').classList.toggle('busy', Boolean(b));
+  $('hint').classList.toggle('call', !b && Boolean(S.site) && !S.target);
+  $('target-readout').hidden = !S.target || Boolean(b) || S.landed || Boolean(S.result);
+  $('btn-replay').hidden = !S.landed || Boolean(b);
+  $('btn-scan').hidden = !S.site || Boolean(b);
+  $('btn-newspot').hidden = !S.target || Boolean(b) || (S.result && !S.suggestion && S.result.verdict !== 'SAFE') || S.landed;
+  $('btn-replan').hidden = !S.result || Boolean(b) || S.landed || S.result.verdict === 'SAFE';
+  const safe = S.result?.verdict === 'SAFE' && Boolean(S.cands.get(S.chosenKey));
+  $('btn-video').hidden = !VIDEO || !safe || Boolean(b);
+  $('btn-video').disabled = !safe || Boolean(b);
   $('site-picker').disabled = Boolean(b);
-  for (const id of ['scan', 'plan', 'hop']) $(`btn-${id}`).classList.toggle('busy', b === id);
+  const st = stepStates();
+  for (const li of $('steps').children) li.className = st[li.dataset.step];
+  idleCard();
 }
 const setBusy = (b) => { S.busy = b; updateButtons(); };
+
+// Server status lines → short, friendly progress text.
+function prettyStatus(m) {
+  return String(m)
+    .replace(/^simulator: /, 'Simulator ')
+    .replace(/route shapes/g, 'flight paths')
+    .replace(/ against the footage \(round \d+\)/, ' against the footage…')
+    .replace(/^people are in the way/, 'People are in the way');
+}
 
 function logEvent(ev) {
   if (!ev || ev.type === 'done' || ev.type === 'json') return;
@@ -65,7 +153,8 @@ function logEvent(ev) {
   const d = ev.data ?? {};
   if (['status', 'log', 'thought', 'tool', 'sim_result', 'error'].includes(ev.type)) {
     panel.log(ev.type === 'status' ? 'log' : ev.type, ev.type === 'sim_result' ? { ...d, ok: true } : d, ev.t_ms);
-    if (ev.type === 'status' && d.message) status(d.message);
+    if (ev.type === 'status' && d.message) status(prettyStatus(d.message));
+    if (S.busy === 'plan' && ['thought', 'tool', 'sim_result'].includes(ev.type)) panel.activity(ev.type, d);
   }
 }
 
@@ -120,16 +209,17 @@ async function loadSite(id) {
   S.site = info?.site ? normalizeSite(info.site) : null;
   resetPlan();
   setTarget(null);
+  scene.setWorldImage(null);
   scene.setSite(S.site);
   showZones();
-  showFootage().then(ensureIllustrated);
+  showFootage().then(() => { ensureIllustrated(); ensureWorld(); });
   cams.setCameras(S.rig, S.media);
   cams.clearScores();
   cams.setRound(S.site ? S.site.round ?? 0 : null, { done: (S.site?.round ?? 0) > 0 });
   $('site-name').textContent = S.site?.name ?? info?.name ?? id;
   if (S.site) refreshRenders();
-  panel.banner('idle', S.site ? 'Tap a landing spot, then PLAN' : 'No site yet — press SCAN');
-  status(S.site ? `${S.site.obstacles.length} obstacles · ${CAR.name}` : 'Press SCAN to reconstruct this street');
+  siteInfo();
+  status('');
   updateButtons();
 }
 
@@ -160,6 +250,8 @@ async function scan() {
   setBusy('scan');
   resetPlan();
   cams.clearScores();
+  openCams(true);
+  panel.banner('busy', 'Scanning…', 'Argon rebuilds the street in 3D from the 4 camera clips, renders it from each camera, and fixes what doesn\'t match the footage (up to 3 rounds).', { kicker: 'Step 1 · Scan' });
   panel.log('log', { message: `— SCAN ${id} —` });
   status('Scanning…');
   if (!MOCK) fetch('/api/plan/prewarm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ site_id: id }) }).catch(() => {});
@@ -170,7 +262,7 @@ async function scan() {
         const r = await fetch(`/api/sites/${id}/ingest`, { method: 'POST' });
         if (r.ok) {
           const j = await r.json();
-          if (j.cameras) { S.media = j.cameras; cams.setMedia(j.cameras); showFootage().then(ensureIllustrated); }
+          if (j.cameras) { S.media = j.cameras; cams.setMedia(j.cameras); showFootage().then(() => { ensureIllustrated(); ensureWorld(); }); }
           panel.log('log', { message: `ingest: ${j.cameras?.length ?? 0} cameras transcoded` });
         } else panel.log('log', { message: `ingest: HTTP ${r.status}${r.status === 501 ? ' (not implemented yet)' : ''}` });
       } catch (err) { panel.log('log', { message: `ingest failed: ${err.message}` }); }
@@ -235,16 +327,16 @@ async function scan() {
       showZones();
       showFootage();
       cams.setRound(round, { done: crit.done, busy: !crit.done });
-      if (crit.done) break;
+      if (crit.done) { ensureWorld(); break; }
     }
     refreshRenders();
     cams.setRound(S.site.round ?? 0, { done: true });
-    panel.banner('idle', 'Street verified — tap a landing spot, then PLAN');
-    status(`Site ready · ${S.site.obstacles.length} obstacles · reconstruction round ${S.site.round ?? 0}`);
+    siteInfo();
+    status('');
   } catch (err) {
     console.error(err);
     panel.log('error', { message: `SCAN failed: ${err.message}` });
-    status(`SCAN failed: ${err.message}`);
+    status(`Scan failed: ${err.message}`);
   } finally {
     setBusy(null);
   }
@@ -253,10 +345,13 @@ async function scan() {
 // ---------------------------------------------------------------- PLAN
 function resetPlan() {
   S.rounds = []; S.cands = new Map(); S.selectedKey = null; S.chosenKey = null; S.result = null;
+  S.planError = null; S.suggestion = null; S.landed = false;
+  $('details-sub').textContent = 'checks · air · flight paths · agent log';
   scene.clearPlan();
   scene.resetCar();
   panel.showRounds([]);
   panel.showArc(null);
+  panel.setCardRoute(null);
   panel.stopValidity();
   updateButtons();
 }
@@ -308,9 +403,11 @@ function onPlanEvent(ev) {
     panel.log('attempt', { ok, message: `${d.id} ${d.label ?? ''}: ${d.sim.verdict}${ok ? ` · ${fmt(d.sim.air?.remaining_kg, 0)} kg air left` : ` — ${cand.reason}`}${d.disagrees ? ` (agent claimed ${d.agent_claim?.sim_verdict})` : ''}` }, ev.t_ms);
     select(cand.key);
     const r = roundObj(d.round);
-    panel.banner('busy', `Planning — round ${d.round}/${MAX_PLAN_ROUNDS}`, `${r.candidates.length}/4 routes simulated`);
+    panel.banner('busy', 'Planning…', `Round ${d.round} of up to ${MAX_PLAN_ROUNDS} · ${r.candidates.length} flight path${r.candidates.length === 1 ? '' : 's'} simulated`, { kicker: 'Step 3 · Plan' });
+    panel.showRounds(S.rounds, { selectedKey: S.selectedKey, chosenKey: S.chosenKey, site: S.site });
+    $('details-sub').textContent = `${S.cands.size} flight path${S.cands.size === 1 ? '' : 's'} tried so far`;
   } else if (ev.type === 'plan') finalizePlan(d);
-  else if (ev.type === 'error') panel.banner('reject', 'Planner error', d.message ?? '');
+  else if (ev.type === 'error') { S.planError = d.message ?? 'error'; panel.banner('error', 'Planner error', d.message ?? ''); }
 }
 
 function finalizePlan(result) {
@@ -335,47 +432,60 @@ function finalizePlan(result) {
   S.chosenKey = chosen?.key ?? null;
   scene.setPlanView({ visibleRound: chosen?.round ?? lastRound?.n ?? 1, chosenKey: S.chosenKey, selectedKey: S.chosenKey });
   if (chosen) {
-    const clr = chosen.sim.checks?.find((c) => c.id === 'clearance')?.value;
-    panel.banner('safe', `SAFE — ${chosen.id} ${chosen.label ?? ''}`, `clears by ${fmt(clr, 2)} m · ${fmt(chosen.sim.air?.remaining_kg, 0)} kg air left · picked by the agent, verified by our simulator`);
     select(chosen.key);
+    panel.setCardRoute(chosen, S.site);
+    const why = S.rounds.find((r) => r.n === chosen.round)?.why ?? (result.rounds ?? []).find((r) => r.chosen_id === chosen.id)?.why;
+    const picker = S.mode === 'search' || S.mode === 'agent' ? 'Managed Agent' : 'Argon';
+    panel.banner('safe', 'SAFE', why ? `${picker} picked ${chosen.id} because ${why.replace(/^\s*(because\s+)?/i, '').replace(/^./, (c) => c.toLowerCase())}` : `${picker} picked ${chosen.id}; our simulator verified it.`, { kicker: `Flight path ${chosen.id}${chosen.label ? ` · ${chosen.label}` : ''}` });
     panel.startValidity();
   } else {
-    const reason = result.reject_reason ?? 'no safe route in 3 rounds';
-    panel.banner('reject', 'REJECTED', reason);
-    const sug = result.suggested_target;
-    if (sug) {
-      const b = $('suggest');
-      b.hidden = false;
-      b.textContent = `Land ${fmt(sug.offset_m, 1)} m away instead? (${fmt(sug.forward, 1)}, ${fmt(sug.right, 1)}) → PLAN`;
-      b.onclick = () => { b.hidden = true; setTarget({ forward: sug.forward, right: sug.right }); plan(); };
-    } else if (result.suggested_wait_s) {
-      const b = $('suggest');
-      b.hidden = false;
-      b.textContent = `Wait ${result.suggested_wait_s} s for people to clear, then hop → PLAN`;
-      b.onclick = () => { b.hidden = true; plan({ wait_s: result.suggested_wait_s }); };
-    }
     const lr = lastRound?.candidates?.[0];
     if (lr) select(lr.key);
+    panel.setCardRoute(lr ?? null, S.site);
+    const reason = result.reject_reason ?? `No safe route in ${MAX_PLAN_ROUNDS} rounds.`;
+    panel.banner('reject', 'REJECTED', reason, { kicker: lr ? `No safe flight path · showing ${lr.id}` : 'No safe flight path' });
+    S.suggestion = suggestionFor(result);
   }
   if (dis.size) panel.log('error', { message: `Server sim disagreed with the agent on ${[...dis.keys()].join(', ')} — the server's verdict wins.` });
   panel.showRounds(S.rounds, { selectedKey: S.selectedKey, chosenKey: S.chosenKey, site: S.site });
+  $('details-sub').textContent = S.cands.size ? `${S.cands.size} flight path${S.cands.size === 1 ? '' : 's'} tried · checks · agent log` : 'reasons · agent log';
   updateButtons();
+}
+
+// REJECT → one concrete next step: a nearby spot, or waiting for people to clear.
+function suggestionFor(result) {
+  const sug = result.suggested_target;
+  if (sug && S.target) {
+    const df = sug.forward - S.target.forward, dr = sug.right - S.target.right;
+    const dist = sug.offset_m ?? Math.hypot(df, dr);
+    const dir = Math.abs(dr) >= Math.abs(df) ? (dr < 0 ? 'left' : 'right') : (df > 0) === (S.target.forward >= 0) ? 'farther' : 'closer';
+    return {
+      label: `Land ${fmt(dist, 1)} m ${dir} instead`,
+      run: () => { setTarget({ forward: sug.forward, right: sug.right }); plan(); },
+    };
+  }
+  if (result.suggested_wait_s) {
+    const w = result.suggested_wait_s;
+    return { label: `Wait ${w} s, then plan`, run: () => plan({ wait_s: w }) };
+  }
+  return null;
 }
 
 async function plan({ wait_s = 0 } = {}) {
   if (!S.site) return;
   if (!S.target) {
-    const h = $('hint');
-    h.hidden = false;
-    h.animate([{ transform: 'translateX(-50%) scale(1)' }, { transform: 'translateX(-50%) scale(1.08)' }, { transform: 'translateX(-50%) scale(1)' }], { duration: 400 });
+    $('hint').animate([{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }, { transform: 'scale(1)' }], { duration: 400 });
     return;
   }
   resetPlan();
-  $('suggest').hidden = true;
+  S.statusMsg = wait_s ? `Waiting ${wait_s} s for people to clear, then planning…` : ({ agent: 'Starting the Managed Agent…', search: 'Simulator searching 400 flight paths…', quick: 'Simulator searching 400 flight paths…' })[S.mode] ?? 'Argon proposing 4 flight paths…';
   setBusy('plan');
   panel.log('log', { message: `— PLAN → ${fmt(Math.abs(S.target.forward), 1)} m ${S.target.forward < 0 ? 'behind' : 'ahead'}, ${fmt(Math.abs(S.target.right), 1)} m ${S.target.right < 0 ? 'left' : 'right'} (${S.mode}) —` });
-  panel.banner('busy', `Planning — round 1/${MAX_PLAN_ROUNDS}`, ({ agent: 'Managed Agent running our simulator in its sandbox', search: 'Simulator searching 400 routes · Argon judging them against the footage' })[S.mode] ?? 'Local planner + our simulator');
-  status('Planning…');
+  panel.banner('busy', 'Planning…', ({
+    agent: 'The Managed Agent proposes every flight path itself and tests them in our simulator (~2 min). Only paths our simulator passes can be picked.',
+    search: 'Our simulator searches 400 flight paths (~4 s). Then the Managed Agent looks at the camera photos, tests its own paths in the simulator, and picks one (~90 s).',
+    quick: 'Our simulator searches 400 flight paths; Argon picks one of the safe ones (~30 s).',
+  })[S.mode] ?? 'Argon proposes 4 flight paths per round; our simulator checks each one.', { kicker: 'Step 3 · Plan' });
   const mock = S.target.forward > 35 ? 'plan-reject' : 'plan';
   try {
     const { events } = await runStage({
@@ -392,14 +502,16 @@ async function plan({ wait_s = 0 } = {}) {
     });
     if (!lastOf(events, 'plan')) {
       const e = lastOf(events, 'error');
-      panel.banner('reject', 'Planner error', e?.data?.message ?? 'stream ended without a plan');
+      S.planError = e?.data?.message ?? 'stream ended without a plan';
+      panel.banner('error', 'Planner error', S.planError);
     }
-    status(S.result ? (S.result.verdict === 'SAFE' ? 'Plan ready — press HOP' : 'Plan rejected') : 'Planner error');
+    status('');
   } catch (err) {
     console.error(err);
-    panel.banner('reject', 'Planner error', err.message);
+    S.planError = err.message;
+    panel.banner('error', 'Planner error', err.message);
     panel.log('error', { message: `PLAN failed: ${err.message}` });
-    status(`PLAN failed: ${err.message}`);
+    status('');
   } finally {
     setBusy(null);
   }
@@ -409,12 +521,15 @@ async function plan({ wait_s = 0 } = {}) {
 async function hop() {
   const chosen = S.cands.get(S.chosenKey);
   if (!chosen) return;
+  S.statusMsg = `Flying along flight path ${chosen.id}…`;
   setBusy('hop');
+  panel.stopValidity();
   scene.highlight([]);
-  status(`HOP · ${chosen.id} ${chosen.label ?? ''}`);
   await scene.playRoute(chosen.sim, { chase: true, keep: true });
   const td = chosen.sim.touchdown;
-  status(td ? `Landed ${fmt(td.miss_m, 2)} m from target · ${fmt(td.v_vertical, 1)} m/s touchdown · ${fmt(chosen.sim.air?.remaining_kg, 0)} kg air left` : 'Landed');
+  S.landed = true;
+  S.statusMsg = td ? `Landed ${fmt(td.miss_m, 2)} m from the spot · ${fmt(td.v_vertical, 1)} m/s touchdown · ${fmt(chosen.sim.air?.remaining_kg, 0)} kg air left` : 'Landed';
+  panel.banner('safe', 'Landed', S.statusMsg, { kicker: `Flight path ${chosen.id} · flight complete` });
   setBusy(null);
 }
 
@@ -426,17 +541,19 @@ async function video() {
     const mod = await import(/* @vite-ignore */ path);
     const open = mod.openVideoPanel ?? mod.default;
     if (typeof open !== 'function') throw new Error('video-panel.js has no openVideoPanel()');
-    await open({ siteId: S.siteId, site: S.site, plan: S.result, chosen, recordHop: () => scene.recordHop(chosen.sim), log: (m) => panel.log('log', { message: m }) });
+    await open({ siteId: S.siteId, site: S.site, plan: S.result, chosen, carVariant: scene.carVariant, recordHop: () => scene.recordHop(chosen.sim), log: (m) => panel.log('log', { message: m }) });
   } catch (err) {
     console.warn('video panel unavailable', err);
-    status('Photoreal video is not available yet');
+    panel.log('error', { message: 'Photoreal video is not available yet' });
   }
 }
 
 // ---------------------------------------------------------------- target
 // Look of the 3D world: 'illustrated' (image-model redraw of each camera
 // frame, projected), 'photo' (raw footage projected) or 'model'.
-let LOOK = (() => { try { return localStorage.getItem('flyme.look'); } catch { return null; } })() ?? 'illustrated';
+// Default Photo: raw footage is pixel-aligned with the rebuild (the illustrated
+// redraw shifts things, so outlines drift). ?look= is a hidden override.
+const LOOK = ['illustrated', 'photo', 'model'].includes(params.get('look')) ? params.get('look') : 'photo';
 async function showFootage() {
   const hasIllus = S.media.some((m) => m.illustrated_url);
   const hasPhoto = S.media.some((m) => m.keyframe_url);
@@ -446,10 +563,6 @@ async function showFootage() {
   const media = S.media.map((m) => ({ id: m.id, keyframe_url: look === 'illustrated' ? m.illustrated_url : m.keyframe_url }));
   const ok = look !== 'model' && await scene.setFootage(S.rig, media, S.site?.camera_horizons).catch(() => false);
   scene.setPhoto(Boolean(ok), { look });
-  for (const b of $('look').querySelectorAll('button')) {
-    b.classList.toggle('on', b.dataset.look === (ok ? look : 'model'));
-    b.disabled = (b.dataset.look === 'illustrated' && !hasIllus) || (b.dataset.look === 'photo' && !hasPhoto);
-  }
 }
 
 // Ask the server for illustrated frames (cached; ~20 s the first time).
@@ -464,6 +577,25 @@ async function ensureIllustrated() {
   } catch { /* visual only */ }
 }
 
+// AI world view: the image model paints a photoreal picture for the fixed
+// chase camera from our layout render + the keyframes (server/worldview.js).
+// Opt-in (?world=1): the model doesn't follow the layout closely enough yet.
+let worldFor = null;
+async function ensureWorld() {
+  if (params.get('world') !== '1' || !S.site || !S.siteId || !S.media.some((m) => m.keyframe_url) || worldFor === S.siteId) return;
+  const id = (worldFor = S.siteId);
+  try {
+    panel.log('log', { message: 'Generating a realistic view of the street…' });
+    const r = await fetch(`/api/sites/${encodeURIComponent(id)}/worldview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guide: scene.captureGuide() }),
+    });
+    const j = r.ok ? await r.json() : null;
+    if (S.siteId !== id) return;
+    if (!j?.url) { worldFor = null; panel.log('log', { message: `Realistic view unavailable${j?.error ? `: ${j.error}` : ''}` }); return; }
+    await scene.setWorldImage(j.url);
+  } catch (err) { worldFor = null; console.warn('worldview failed', err); }
+}
+
 function showZones() {
   try { scene.setZones(S.site ? landableMap(S.site) : null); } catch (err) { console.warn('landable map failed', err); }
 }
@@ -472,16 +604,19 @@ function setTarget(t) {
   S.target = t;
   scene.setTarget(t);
   const el = $('target-readout');
-  el.hidden = !t;
-  if (t) el.innerHTML = `Landing spot <b>${fmt(Math.abs(t.forward), 1)} m</b> ${t.forward < 0 ? 'behind' : 'ahead'} · <b>${fmt(Math.abs(t.right), 1)} m</b> ${t.right < 0 ? 'left' : 'right'}`;
-  $('hint').hidden = Boolean(t);
+  if (t) el.innerHTML = `<span class="pin"></span>Landing spot <b>${fmt(Math.abs(t.forward), 1)} m</b> ${t.forward < 0 ? 'behind' : 'ahead'} · <b>${fmt(Math.abs(t.right), 1)} m</b> ${t.right < 0 ? 'left' : 'right'}`;
+  updateButtons();
 }
 
 function onTap(t) {
-  if (S.busy) return;
-  if (S.rounds.length) { resetPlan(); panel.banner('idle', 'New landing spot — press PLAN'); }
+  if (S.busy || !S.site) return;
+  if (S.rounds.length || S.result || S.landed || S.planError) resetPlan();
   setTarget(t);
-  if (!S.rounds.length) panel.banner('idle', 'Landing spot set — press PLAN');
+}
+
+function newSpot() {
+  resetPlan();
+  setTarget(null);
 }
 
 // ---------------------------------------------------------------- bar extras
@@ -510,44 +645,51 @@ async function loadEval() {
   } catch {}
 }
 
+$('btn-replay').addEventListener('click', hop);
 $('btn-scan').addEventListener('click', scan);
-$('btn-plan').addEventListener('click', () => plan());
-$('btn-hop').addEventListener('click', hop);
+$('btn-newspot').addEventListener('click', newSpot);
+$('btn-replan').addEventListener('click', () => plan());
 $('btn-video').addEventListener('click', video);
+
+// Camera drawer (collapsible).
+function openCams(open) {
+  $('cams').classList.toggle('open', open);
+  $('cams-toggle').setAttribute('aria-expanded', String(open));
+}
+$('cams-toggle').addEventListener('click', () => openCams(!$('cams').classList.contains('open')));
+if (window.innerWidth < 1100) openCams(false);
+
+// Specs popover: click outside / Esc closes.
+function toggleSpecs(open) {
+  const show = open ?? $('specs-pop').hidden;
+  $('specs-pop').hidden = !show;
+  $('btn-specs').classList.toggle('on', show);
+  $('btn-specs').setAttribute('aria-expanded', String(show));
+}
 $('site-picker').addEventListener('change', (e) => loadSite(e.target.value));
-$('plan-mode').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-mode]');
-  if (!b) return;
-  S.mode = b.dataset.mode;
-  for (const x of $('plan-mode').querySelectorAll('button')) x.classList.toggle('on', x === b);
-});
-$('btn-replay').addEventListener('click', () => {
-  S.replay = !S.replay;
-  $('btn-replay').classList.toggle('on', S.replay);
-  pills();
-});
-$('btn-specs').addEventListener('click', (e) => {
-  e.stopPropagation();
-  $('specs-pop').hidden = !$('specs-pop').hidden;
-  $('btn-specs').classList.toggle('on', !$('specs-pop').hidden);
-});
-document.addEventListener('click', (e) => {
-  if (!$('specs-pop').hidden && !e.target.closest('#specs-pop')) { $('specs-pop').hidden = true; $('btn-specs').classList.remove('on'); }
-});
+$('btn-specs').addEventListener('click', (e) => { e.stopPropagation(); toggleSpecs(); });
+document.addEventListener('click', (e) => { if (!e.target.closest('#specs-pop')) toggleSpecs(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { toggleSpecs(false); $('lightbox').hidden = true; } });
 $('view-controls').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-view]');
   if (b && !scene.playing) scene.setView(b.dataset.view);
+});
+$('car-variant')?.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-car]');
+  if (!b) return;
+  scene.setCarVariant(b.dataset.car);
+  for (const x of $('car-variant').querySelectorAll('button')) x.classList.toggle('on', x === b);
+  for (const x of $('view-controls').querySelectorAll('button')) x.classList.toggle('on', x.dataset.view === scene.view);
 });
 // Keyboard shortcuts for the stage: S scan, P plan, H hop.
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey) return;
   const k = e.key.toLowerCase();
-  if (k === 's' && !$('btn-scan').disabled) scan();
-  if (k === 'p' && !$('btn-plan').disabled) plan();
-  if (k === 'h' && !$('btn-hop').disabled) hop();
+  if (k === 's' && canScan()) scan();
+  if (k === 'p' && canPlan()) plan();
+  if (k === 'h' && canHop()) hop();
 });
 
-$('btn-replay').classList.toggle('on', S.replay);
 renderSpecs();
 pills();
 updateButtons();
@@ -559,10 +701,3 @@ if (params.get('target')) {
   if (Number.isFinite(f) && Number.isFinite(r)) setTarget({ forward: f, right: r });
 }
 
-$('look').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-look]');
-  if (!b || b.disabled) return;
-  LOOK = b.dataset.look;
-  try { localStorage.setItem('flyme.look', LOOK); } catch { /* per-viewer convenience */ }
-  showFootage();
-});

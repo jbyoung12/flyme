@@ -1,7 +1,7 @@
 // Safety checks for flyme flight traces (PLAN.md §5, §6.5).
 // Zero dependencies: runs in Node 22 (Managed Agent sandbox), server, and browser.
 
-import { SAFETY, SIM, CHECKS } from './constants.js';
+import { CAR, SAFETY, SIM, CHECKS } from './constants.js';
 import {
   prepareObstacles,
   carToObstacleClearance3D,
@@ -9,6 +9,8 @@ import {
 } from './geometry.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
+const CAR_HALF_H = CAR.height / 2;
+const CAR_BOUND_RADIUS = Math.hypot(CAR.length / 2, CAR.width / 2, CAR_HALF_H);
 
 const CHECK_LABELS = Object.fromEntries(CHECKS.map((c) => [c.id, c.label]));
 
@@ -72,6 +74,33 @@ export function runChecks(site, simTrace, preparedObs) {
       }
 
       const carPos = { forward: fr.forward, right: fr.right, up: fr.up };
+
+      // 3. Pedestrian check (horizontal distance >= 5 m, with takeoff grace if 0 < p(0) < 5 m)
+      if (isPerson) {
+        const pDist = carToPersonHorizontalDistance2D(carPos, obs, t);
+        if (gracePedActive) {
+          if (pDist >= maxPedSoFar - 1e-4 && pDist < SAFETY.pedestrianKeepOutM) { // grace lasts while they only get farther away
+            maxPedSoFar = Math.max(maxPedSoFar, pDist);
+          } else {
+            gracePedActive = false;
+          }
+        }
+        if (!gracePedActive && pDist < minPedestrian.val) {
+          minPedestrian = { val: pDist, t, obs };
+        }
+      }
+
+      // Fast triangle-inequality lower bound cull before 3D surface sampling
+      if (!graceClearanceActive) {
+        const dLower =
+          Math.hypot(carPos.forward - (obs.cf0 + obs.vx * t), carPos.right - (obs.cr0 + obs.vy * t), carPos.up + CAR_HALF_H - obs.cu0) -
+          obs.boundRadius -
+          CAR_BOUND_RADIUS;
+        if (dLower >= minCollision.val && (isPerson || dLower >= minClearance.val)) {
+          continue;
+        }
+      }
+
       const c = carToObstacleClearance3D(carPos, obs, t);
 
       // 1. Collision check (applies to all obstacles including people)
@@ -90,21 +119,6 @@ export function runChecks(site, simTrace, preparedObs) {
         }
         if (!graceClearanceActive && c < minClearance.val) {
           minClearance = { val: c, t, obs };
-        }
-      }
-
-      // 3. Pedestrian check (horizontal distance >= 5 m, with takeoff grace if 0 < p(0) < 5 m)
-      if (isPerson) {
-        const pDist = carToPersonHorizontalDistance2D(carPos, obs, t);
-        if (gracePedActive) {
-          if (pDist >= maxPedSoFar - 1e-4 && pDist < SAFETY.pedestrianKeepOutM) { // grace lasts while they only get farther away
-            maxPedSoFar = Math.max(maxPedSoFar, pDist);
-          } else {
-            gracePedActive = false;
-          }
-        }
-        if (!gracePedActive && pDist < minPedestrian.val) {
-          minPedestrian = { val: pDist, t, obs };
         }
       }
     }

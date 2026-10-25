@@ -1,7 +1,8 @@
-// Right panel (PLAN §8): plan banner, D22 validity banner, verdict + 9-check
-// list + air gauge for the selected arc, rounds with 4 candidate chips each,
-// the agent's "why", and the live agent log.
-import { CHECKS, CAR, SAFETY, PLAN_VALID_S } from '../shared/constants.js';
+// Right column (PLAN §8): a simple result card (big verdict, one-sentence why,
+// three key numbers, D22 validity countdown) and a "Details" disclosure with
+// everything technical: 9-check list + air gauge for the selected route,
+// rounds with candidate chips (tap to replay), and the live agent log.
+import { CHECKS, CAR, SAFETY, PLAN_VALID_S, CANDIDATES_PER_ROUND } from '../shared/constants.js';
 import { esc, fmt, failReason, checkValue } from './format.js';
 
 const ICONS = {
@@ -13,19 +14,120 @@ const ICONS = {
   error: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 1.8l6.5 12H1.5z"/><path d="M8 6.5v3.2M8 11.6v.4"/></svg>',
 };
 
-export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl, airEl, roundsEl, logEl, onSelect }) {
+export function createPanel({ cardEl, kickerEl, bannerEl, whyEl, whyMoreEl, progressEl, activityEl, keynumsEl, validEl, verdictEl, titleEl, checklistEl, airEl, roundsEl, logEl, onSelect }) {
   let validTimer = null;
+  let kind = 'idle';
+  let current = null; // the card's route (chosen one, or the closest try on REJECT)
 
-  function banner(kind, text, sub = '') {
-    bannerEl.className = `banner ${kind}`;
-    bannerEl.innerHTML = `${esc(text)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}`;
+  // ---------------------------------------------------------------- card
+  // kind: idle | busy | safe | reject | error. text = big verdict, sub = the "why".
+  function banner(k, text, sub = '', { kicker } = {}) {
+    kind = k;
+    cardEl.className = `card ${k}`;
+    bannerEl.textContent = text;
+    kickerEl.textContent = kicker ?? ({ idle: 'Result', busy: 'Working', safe: 'Plan', reject: 'Plan', error: 'Problem' })[k] ?? 'Result';
+    setWhy(sub);
+    progressEl.hidden = k !== 'busy';
+    if (k !== 'busy') resetActivity();
+    drawKeyNums();
   }
 
-  // ---------------------------------------------------------------- selected arc
+  // ---------------------------------------------------------------- live agent activity (planning)
+  // The wait is the show: latest thought, what the agent is running, and what
+  // our simulator told it — in the card, not only in the hidden log.
+  let act = null;
+  let actTimer = null;
+  function resetActivity() {
+    act = null;
+    if (actTimer) clearInterval(actTimer);
+    actTimer = null;
+    activityEl.hidden = true;
+    activityEl.innerHTML = '';
+  }
+  function describeTool(d) {
+    const code = `${d.name ?? ''} ${d.code ?? d.command ?? d.message ?? ''}`;
+    if (/view_file|read_file/.test(code) && !/\.(jpe?g|png)\b/i.test(code)) return { text: 'Managed Agent reading the 3D street model…', code: '' };
+    if (/sim-cli|simulat/i.test(code)) return { text: 'Managed Agent testing its own paths in the simulator…', code: '' };
+    if (/result\.json|> ?\/workspace\/out|writeFile|cat\s*>/.test(code)) return { text: 'Managed Agent writing its decision…', code: '' };
+    if (/\.(jpe?g|png)\b|frames?/i.test(code)) return { text: 'Managed Agent looking at the camera photos…', code: '' };
+    if (/site\.json|cat |head |jq |less /.test(code)) return { text: 'Managed Agent reading the 3D street model…', code: '' };
+    return { text: 'Running', code: code.split('\n')[0].slice(0, 80) };
+  }
+  function activity(type, d = {}) {
+    if (kind !== 'busy') return;
+    act ??= { t0: performance.now(), thought: '', tool: null, sim: '', n: 0 };
+    if (type === 'thought') act.thought = String(d.text ?? d.message ?? d.delta ?? '').replace(/\*\*([^*]+)\*\*/g, '$1 — ').replace(/[*`#]/g, '').replace(/\s+/g, ' ').trim().slice(0, 400) || act.thought;
+    else if (type === 'tool') { act.tool = describeTool(d); act.n++; }
+    else if (type === 'sim_result') act.sim = String(d.summary ?? d.message ?? '');
+    if (!actTimer) actTimer = setInterval(drawActivity, 1000);
+    drawActivity();
+  }
+  function drawActivity() {
+    if (!act) return;
+    const secs = Math.round((performance.now() - act.t0) / 1000);
+    activityEl.hidden = false;
+    activityEl.innerHTML = [
+      act.thought ? `<div class="act-thought"><div class="act-lbl">Managed Agent is thinking</div><div class="act-tx">${esc(act.thought)}</div></div>` : '',
+      act.tool ? `<div class="act-row tool live"><span class="ic">›_</span><span class="tx">${esc(act.tool.text)}${act.tool.code ? ` <code>${esc(act.tool.code)}</code>` : ''}</span></div>` : '',
+      act.sim ? `<div class="act-row sim"><span class="ic">✓</span><span class="tx" title="${esc(act.sim)}">${esc(act.sim)}</span></div>` : '',
+      `<div class="act-meta">Managed Agent · ${act.n} step${act.n === 1 ? '' : 's'} · ${secs} s</div>`,
+    ].join('');
+  }
+
+  function setWhy(text) {
+    whyEl.textContent = text ?? '';
+    whyEl.classList.remove('open');
+    whyEl.hidden = !text;
+    whyMoreEl.hidden = true;
+    whyMoreEl.textContent = 'more';
+    // show "more" only when the clamp actually truncates
+    requestAnimationFrame(() => { whyMoreEl.hidden = !text || whyEl.scrollHeight <= whyEl.clientHeight + 2; });
+  }
+  whyMoreEl.addEventListener('click', () => {
+    const open = whyEl.classList.toggle('open');
+    whyMoreEl.textContent = open ? 'less' : 'more';
+  });
+
+  function busyText(text) { progressEl.dataset.text = text ?? ''; drawProgress(); }
+
+  // ---------------------------------------------------------------- key numbers
+  function num(label, value, unit, sub, state) {
+    return `<div class="kn ${state ?? ''}"><div class="kn-lbl">${esc(label)}</div><div class="kn-val">${value}<small>${esc(unit)}</small></div><div class="kn-sub">${sub}</div></div>`;
+  }
+
+  function drawKeyNums() {
+    const sim = current?.sim;
+    const show = sim && (kind === 'safe' || kind === 'reject');
+    keynumsEl.hidden = !show;
+    if (!show) { keynumsEl.innerHTML = ''; return; }
+    const chk = (id) => sim.checks?.find((c) => c.id === id);
+    const clr = chk('clearance');
+    const air = sim.air ?? {};
+    const start = air.start_kg ?? CAR.airKg;
+    const left = air.remaining_kg;
+    const td = sim.touchdown;
+    const tdv = chk('touchdown_vertical');
+    const st = (c) => (!c ? '' : c.pass ? 'ok' : 'bad');
+    const airPct = left == null ? 0 : Math.max(0, Math.min(100, (left / start) * 100));
+    const resPct = (SAFETY.airReserveKg / start) * 100;
+    const airBar = `<div class="kn-bar"><i style="width:${airPct}%"></i><b style="left:${resPct}%"></b></div>`;
+    const fails = (sim.checks ?? []).filter((c) => !c.pass);
+    const failLine = sim.verdict === 'SAFE' || !fails.length ? '' : `<div class="kn-fail"><span class="x">✕</span><span><b>${esc(current.id)}</b> fails: ${esc(failReason(sim, cardSite) ?? fails[0].id)}${fails.length > 1 ? ` <span class="faint">+${fails.length - 1} more check${fails.length > 2 ? 's' : ''}</span>` : ''}</span></div>`;
+    keynumsEl.innerHTML = failLine + [
+      num('Clearance', fmt(clr?.value, 2), 'm', `need ≥ ${clr?.limit ?? SAFETY.minClearanceM} m`, st(clr)),
+      num('Air left', fmt(left, 0), 'kg', `${airBar}reserve ${SAFETY.airReserveKg} kg`, left == null ? '' : left >= SAFETY.airReserveKg ? 'ok' : 'bad'),
+      num('Touchdown', fmt(td?.v_vertical ?? tdv?.value, 1), 'm/s', `need < ${tdv?.limit ?? SAFETY.maxTouchdownVerticalMs} m/s`, st(tdv)),
+    ].join('');
+  }
+
+  // ---------------------------------------------------------------- selected arc (Details)
+  let cardSite = null;
+  function setCardRoute(c, site) { current = c ?? null; cardSite = site ?? cardSite; drawKeyNums(); }
+
   function showArc(c, site) {
     if (!c) {
       verdictEl.className = 'verdict none';
-      verdictEl.textContent = 'No route selected';
+      verdictEl.textContent = 'No flight path selected';
       titleEl.textContent = '';
       checklistEl.innerHTML = CHECKS.map((k) => `<li class="na"><span class="ic">·</span><span class="lbl">${esc(k.label)}</span><span class="val">—</span></li>`).join('');
       airEl.innerHTML = gaugeHTML(null);
@@ -35,12 +137,12 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
     const safe = sim.verdict === 'SAFE';
     const reason = safe ? '' : failReason(sim, site);
     verdictEl.className = `verdict ${safe ? 'safe' : 'unsafe'}`;
-    verdictEl.innerHTML = safe ? 'SAFE' : `UNSAFE <span class="reason">— ${esc(reason ?? 'see checks')}</span>`;
+    verdictEl.innerHTML = `${esc(c.id)} · ${safe ? 'SAFE' : `UNSAFE <span class="reason">— ${esc(reason ?? 'see checks')}</span>`}`;
     const p = c.params ?? sim.params ?? {};
     const disagree = c.disagrees
       ? `<div class="note disagree">Agent claimed ${esc(c.agent_claim?.sim_verdict ?? '?')}; our simulator says ${esc(sim.verdict)} — the simulator wins.</div>`
       : '';
-    titleEl.innerHTML = `<b>${esc(c.id)}</b> · ${esc(c.label ?? '')}<br><span class="small">apex ${fmt(p.apex_height_m, 1)} m · ${fmt(p.duration_s, 1)} s · bow ${fmt(p.side_bow_m, 1)} m · climb ${fmt(p.climb_bias, 2)}${p.vertical_drop ? ` · drop ${fmt(p.vertical_drop, 2)}` : ''}</span>${disagree}`;
+    titleEl.innerHTML = `${esc(c.label ?? '')}<br><span class="small">apex ${fmt(p.apex_height_m, 1)} m · ${fmt(p.duration_s, 1)} s · bow ${fmt(p.side_bow_m, 1)} m · climb ${fmt(p.climb_bias, 2)}${p.vertical_drop ? ` · drop ${fmt(p.vertical_drop, 2)}` : ''}</span>${disagree}`;
     checklistEl.innerHTML = CHECKS.map((k) => {
       const ch = sim.checks?.find((x) => x.id === k.id);
       const cls = !ch ? 'na' : ch.pass ? 'pass' : 'fail';
@@ -69,20 +171,24 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
 
   // ---------------------------------------------------------------- rounds
   // rounds: [{n, candidates: [cand], decision, chosen_id, why, revision_notes}]
+  let lastRounds = [];
   function showRounds(rounds, { selectedKey, chosenKey, site } = {}) {
+    lastRounds = rounds;
+    drawProgress();
     if (!rounds.length) {
-      roundsEl.innerHTML = '<div class="dim small">Each round the agent proposes 4 routes; our simulator checks all 4.</div>';
+      roundsEl.innerHTML = '<div class="dim small">Each round proposes 4 flight paths; our simulator checks every one. None yet.</div>';
       return;
     }
     roundsEl.innerHTML = rounds.map((r) => {
       const chips = [];
-      for (let i = 0; i < 4; i++) {
+      const n = Math.max(CANDIDATES_PER_ROUND, r.candidates.length);
+      for (let i = 0; i < n; i++) {
         const c = r.candidates[i];
         if (!c) { chips.push('<div class="chip pending"><span class="cid">…</span><span class="why">simulating</span></div>'); continue; }
         const chosen = c.key === chosenKey;
         const cls = chosen ? 'chosen' : c.sim?.verdict === 'SAFE' ? 'safe' : 'unsafe';
         const sub = chosen ? 'chosen' : c.sim?.verdict === 'SAFE' ? 'SAFE' : failReason(c.sim, site) ?? 'UNSAFE';
-        chips.push(`<button class="chip ${cls}${c.key === selectedKey ? ' sel' : ''}" data-key="${esc(c.key)}" title="${esc(c.label ?? '')}">
+        chips.push(`<button class="chip ${cls}${c.key === selectedKey ? ' sel' : ''}" data-key="${esc(c.key)}" title="${esc(`${c.label ?? ''} — ${sub}`)}">
           <span class="cid">${esc(c.id)}${c.disagrees ? ' <span class="warn" title="server disagreed with the agent">!</span>' : ''}</span><span class="why">${esc(sub)}</span></button>`);
       }
       const nSafe = r.candidates.filter((c) => c.sim?.verdict === 'SAFE').length;
@@ -92,10 +198,21 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
       return `<div class="round"><div class="round-head"><span><b>Round ${r.n}</b> · ${nSafe}/${r.candidates.length} safe</span><span>${dec}</span></div>
         <div class="chips">${chips.join('')}</div>${why}${rev}</div>`;
     }).join('');
-    // keep the newest round in view
-    const wrap = roundsEl.parentElement;
+    // keep the selected (or newest) round in view
+    const wrap = roundsEl;
     const sel = roundsEl.querySelector('.chip.sel')?.closest('.round');
-    wrap.scrollTop = sel ? sel.offsetTop - 8 : wrap.scrollHeight;
+    wrap.scrollTop = sel ? sel.offsetTop - wrap.offsetTop - 4 : wrap.scrollHeight;
+  }
+
+  // Card progress while planning: status text + one dot per simulated route.
+  function drawProgress() {
+    const text = progressEl.dataset.text ?? '';
+    const rows = lastRounds.map((r) => {
+      const dots = r.candidates.map((c) => `<i class="${c.sim?.verdict === 'SAFE' ? 'ok' : 'bad'}"></i>`).join('');
+      const pend = Math.max(0, CANDIDATES_PER_ROUND - r.candidates.length);
+      return `<div class="pr-row"><span>Round ${r.n}</span><span class="dots">${dots}${'<i></i>'.repeat(pend)}</span></div>`;
+    }).join('');
+    progressEl.innerHTML = `${text ? `<div class="pr-text">${esc(text)}</div>` : ''}${rows}`;
   }
 
   roundsEl.addEventListener('click', (e) => {
@@ -125,7 +242,7 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
     if (near) logEl.scrollTop = logEl.scrollHeight;
   }
 
-  // ---------------------------------------------------------------- D22 banner
+  // ---------------------------------------------------------------- D22 countdown
   function startValidity() {
     stopValidity();
     const t0 = performance.now();
@@ -134,10 +251,10 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
       const left = PLAN_VALID_S - (performance.now() - t0) / 1000;
       if (left > 0) {
         validEl.className = 'valid';
-        validEl.textContent = `Plan valid ~${PLAN_VALID_S} s — rescan before HOP · ${Math.ceil(left)} s`;
+        validEl.innerHTML = `<span>Plan valid ~${PLAN_VALID_S} s — rescan before flying</span><b>${Math.ceil(left)} s</b>`;
       } else {
         validEl.className = 'valid stale';
-        validEl.textContent = 'Plan older than 10 s — rescan before HOP';
+        validEl.innerHTML = `<span>Plan older than ${PLAN_VALID_S} s — rescan before flying</span>`;
         clearInterval(validTimer);
         validTimer = null;
       }
@@ -152,5 +269,6 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
   }
 
   showArc(null);
-  return { banner, showArc, showRounds, log, clearLog: () => (logEl.innerHTML = ''), startValidity, stopValidity };
+  showRounds([]);
+  return { banner, busyText, activity, setCardRoute, showArc, showRounds, log, clearLog: () => (logEl.innerHTML = ''), startValidity, stopValidity, get kind() { return kind; } };
 }

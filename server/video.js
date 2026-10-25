@@ -111,7 +111,7 @@ async function saveOutputVideo(outVideo, destPath) {
   throw new Error('Omni output_video contained neither inline data nor uri');
 }
 
-async function runVideoJob(jobId, { siteId, clip, keyframeCam = 'front', site, params, label }) {
+async function runVideoJob(jobId, { siteId, clip, keyframeCam = 'front', site, params, label, carVariant = 'roadster' }) {
   const state = jobs.get(jobId);
   const update = (patch) => {
     Object.assign(state, patch, { elapsed_s: Math.round((Date.now() - state.started_at) / 1000) });
@@ -138,13 +138,20 @@ async function runVideoJob(jobId, { siteId, clip, keyframeCam = 'front', site, p
     const targetDesc = `${Math.round(targetF)}m ahead${targetR ? ` (${Math.abs(Math.round(targetR))}m ${targetR < 0 ? 'left' : 'right'})` : ''}`;
 
     const promptTemplate = loadPrompt('omni.md');
-    const basePrompt = fill(promptTemplate, {
+    const carDescriptions = {
+      waymo: 'a white Waymo autonomous Jaguar I-PACE SUV equipped with a spinning black roof LiDAR dome and corner sensor pods',
+      ojai: 'a powder-blue 6th-generation Waymo Ojai autonomous capsule minivan with wrap-around panoramic glass and a roof LiDAR sensor array',
+    };
+    let basePrompt = fill(promptTemplate, {
       site_name: site?.name || siteId,
       scene_context: summarizeSceneContext(site),
       apex_m: String(apexM),
       route_label: label || 'climb-first thruster hop',
       target_desc: targetDesc,
     });
+    if (carDescriptions[carVariant]) {
+      basePrompt = basePrompt.replace(/a sleek white aerodynamic sports coupe \(generic unbranded flying car, no logos\)/g, carDescriptions[carVariant]);
+    }
 
     let ix = null;
 
@@ -288,6 +295,7 @@ export async function startVideo(body = {}) {
     site: body.site,
     params: body.params,
     label: body.label,
+    carVariant: body.car_variant || body.carVariant || 'roadster',
   });
 
   return { job: jobId, status: state.status };

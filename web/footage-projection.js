@@ -6,11 +6,15 @@
 import * as THREE from 'three';
 
 const MAX_CAMS = 4;
-const GROUND_RADIUS = 60;
+const GROUND_RADIUS = 74.5; // meets the backdrop: no gap at the horizon
 const BACKDROP_RADIUS = 75;
 const BACKDROP_HEIGHT = 45;
 const OCC_HALF = 64; // occlusion mask covers ±64 m
 const OCC_N = 512;
+// Ground the cameras can't see (out of range, or behind an obstacle) is
+// filled with pavement grey, never a black hole.
+export const PAVEMENT = '#77756f';
+const FADE = [40, 60];
 
 const vertexShader = `
   varying vec3 vW;
@@ -83,15 +87,21 @@ export function createFootageProjection(scene, { bg = '#0b0c0e' } = {}) {
     occ: { value: null }, occHalf: { value: OCC_HALF }, useOcc: { value: 0 },
   });
   const groundMat = new THREE.ShaderMaterial({
-    uniforms: { ...base(), fadeStart: { value: 18 }, fadeEnd: { value: 32 } },
+    uniforms: { ...base(), bg: { value: new THREE.Color(PAVEMENT) }, fadeStart: { value: FADE[0] }, fadeEnd: { value: FADE[1] } },
     vertexShader, fragmentShader,
   });
   const backMat = new THREE.ShaderMaterial({
     uniforms: { ...base(), fadeStart: { value: 1e4 }, fadeEnd: { value: 2e4 } },
     vertexShader, fragmentShader, side: THREE.BackSide, depthWrite: false,
   });
-  // Both materials share the same texture/camera uniforms.
-  for (const k of ['t0', 't1', 't2', 't3', 'cam', 'tanH', 'tanV', 'camH']) backMat.uniforms[k] = groundMat.uniforms[k];
+  // Obstacle boxes get the footage too, so a bike rack shows the bikes on its
+  // box instead of smeared flat across the ground behind it.
+  const objMat = new THREE.ShaderMaterial({
+    uniforms: { ...base(), bg: { value: new THREE.Color(PAVEMENT) }, fadeStart: { value: 1e4 }, fadeEnd: { value: 2e4 } },
+    vertexShader, fragmentShader,
+  });
+  // All materials share the same texture/camera uniforms.
+  for (const k of ['t0', 't1', 't2', 't3', 'cam', 'tanH', 'tanV', 'camH']) backMat.uniforms[k] = objMat.uniforms[k] = groundMat.uniforms[k];
 
   const ground = new THREE.Mesh(new THREE.CircleGeometry(GROUND_RADIUS, 96).rotateX(-Math.PI / 2), groundMat);
   ground.position.y = 0.006;
@@ -159,12 +169,25 @@ export function createFootageProjection(scene, { bg = '#0b0c0e' } = {}) {
       }
     }
     occTex.needsUpdate = true;
-    groundMat.uniforms.useOcc.value = blockers.length ? 1 : 0;
+    hasOcc = blockers.length > 0;
+    groundMat.uniforms.useOcc.value = hasOcc && !pov ? 1 : 0;
+  }
+
+  // From the rig's own camera point every pixel maps straight back to the
+  // camera that shot it: no occlusion dimming, no distance fade.
+  let hasOcc = false, pov = false;
+  function setPov(on) {
+    pov = on;
+    groundMat.uniforms.useOcc.value = hasOcc && !pov ? 1 : 0;
+    groundMat.uniforms.fadeStart.value = pov ? 1e4 : FADE[0];
+    groundMat.uniforms.fadeEnd.value = pov ? 2e4 : FADE[1];
   }
 
   return {
     setFootage,
     setOcclusion,
+    setPov,
+    objMat,
     setVisible(on) { group.visible = on; },
     get visible() { return group.visible; },
   };

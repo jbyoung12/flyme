@@ -24,7 +24,7 @@ export async function uploadFile(siteId, key, filePath, mimeType, sse) {
   const cache = readRun(siteId, 'files.json') ?? {};
   const mtimeMs = fs.statSync(filePath).mtimeMs;
   const hit = cache[key];
-  if (hit && hit.mtimeMs === mtimeMs && Date.now() - hit.uploaded_at < FILE_TTL_MS) {
+  if (hit && (hit.mtimeMs === mtimeMs || process.env.K_SERVICE) && Date.now() - hit.uploaded_at < FILE_TTL_MS) {
     try {
       const f = await client().files.get({ name: hit.name });
       if (f.state === 'ACTIVE') return { name: f.name, uri: f.uri, mimeType: f.mimeType };

@@ -42,3 +42,15 @@ export function checkValue(c) {
   const lim = typeof c.limit === 'number' ? ` <span class="faint">${op} ${c.limit}</span>` : '';
   return `${fmt(c.value, d)} ${unit}${lim}`;
 }
+
+// Very short reason for the 3D arc label: "hits o1", "near person o5".
+export function shortReason(sim) {
+  const c = firstFailure(sim);
+  if (!c) return null;
+  const o = c.obstacle_id ? ` ${c.obstacle_id}` : '';
+  return ({
+    collision: `hits${o}`, clearance: `too close to${o}`, pedestrian: `near person${o}`, thrust_limit: 'thrust limit',
+    touchdown_vertical: 'hard landing', touchdown_horizontal: 'sliding landing', landing_accuracy: 'misses spot',
+    air_reserve: 'low air', landing_zone: 'zone blocked',
+  })[c.id] ?? c.id;
+}

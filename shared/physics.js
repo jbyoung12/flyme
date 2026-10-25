@@ -112,11 +112,21 @@ export function refState(t, params, basis) {
   };
 }
 
+const CAR_HALF_H = CAR.height / 2;
+const CAR_BOUND_RADIUS = Math.hypot(CAR.length / 2, CAR.width / 2, CAR_HALF_H);
+
 function minClearanceAt(carPos, preparedObstacles, t) {
   if (preparedObstacles.length === 0) return 99.9;
   let minC = Infinity;
+  const cu = carPos.up + CAR_HALF_H;
   for (let i = 0; i < preparedObstacles.length; i++) {
-    const c = carToObstacleClearance3D(carPos, preparedObstacles[i], t);
+    const o = preparedObstacles[i];
+    const dLower =
+      Math.hypot(carPos.forward - (o.cf0 + o.vx * t), carPos.right - (o.cr0 + o.vy * t), cu - o.cu0) -
+      o.boundRadius -
+      CAR_BOUND_RADIUS;
+    if (dLower >= minC) continue;
+    const c = carToObstacleClearance3D(carPos, o, t);
     if (c < minC) minC = c;
   }
   return minC;

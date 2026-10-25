@@ -10,13 +10,18 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { CAR, SAFETY, PLAN_VALID_S } from '../shared/constants.js';
 import { obstacleObject, surfaceObjects, toThree, disposeTree } from './site-meshes.js';
 import { buildFlyingCar, glowTexture } from './car-model.js';
-import { esc, fmt } from './format.js';
-import { createFootageProjection } from './footage-projection.js';
+import { esc, fmt, shortReason } from './format.js';
+import { createFootageProjection, PAVEMENT } from './footage-projection.js';
 
 const BG = '#0b0c0e';
 const COLORS = { unsafe: '#ff4d4f', safe: '#2fd27a', chosen: '#3d8bff', amber: '#ffb020' };
+// pov: at the rig's own camera point — the only place the projected footage
+// is undistorted (any other pose warps it onto our rough boxes).
+const EYE = 1.3;
+const POV_BACK = 0, POV_UP = EYE, POV_AHEAD = 0.6;
 const VIEWS = {
-  overview: { pos: [4, 13.5, 16], target: [0, 0, -14] },
+  pov: { pos: [0, POV_UP, POV_BACK], target: [0, EYE - 0.03, -POV_AHEAD] },
+  overview: { pos: [3, 22, 19], target: [0, 0, -15] },
   top: { pos: [0, 58, -13.99], target: [0, 0, -14] },
   side: { pos: [32, 7, -12], target: [0, 2.5, -12] },
 };
@@ -46,15 +51,28 @@ export function createScene(container, { onTap } = {}) {
   scene.fog = new THREE.Fog(BG, 55, 150);
 
   const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 500);
-  camera.position.set(...VIEWS.overview.pos);
-  camera.lookAt(...VIEWS.overview.target);
+  camera.position.set(...VIEWS.pov.pos);
+  camera.lookAt(...VIEWS.pov.target);
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(...VIEWS.overview.target);
+  controls.target.set(...VIEWS.pov.target);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.maxPolarAngle = Math.PI * 0.49;
   controls.minDistance = 4;
   controls.maxDistance = 140;
+  let viewName = 'pov';
+  function applyViewMode() {
+    const pov = viewName === 'pov';
+    controls.minDistance = pov ? 0.1 : 4;
+    controls.enableZoom = !pov;
+    controls.enablePan = !pov;
+    // POV pitch limits: down far enough to see the landing spot, never so far
+    // the unfilmed ground under the car fills the view; up only ~9° so the
+    // top of the 360° backdrop stays out of frame.
+    controls.minPolarAngle = pov ? Math.PI * 0.433 : 0;
+    controls.maxPolarAngle = pov ? Math.PI * 0.55 : Math.PI * 0.49;
+    photo.setPov(pov);
+  }
 
   scene.add(new THREE.HemisphereLight('#c9d6ff', '#0b0c0e', 0.9));
   const key = new THREE.DirectionalLight('#ffffff', 2.2);
@@ -76,25 +94,23 @@ export function createScene(container, { onTap } = {}) {
   // Photo mode: real footage projected onto the ground + a 360° backdrop.
   const photo = createFootageProjection(scene, { bg: BG });
   let photoLook = 'model';
-  // Projected looks put the obstacles in a soft architectural-clay finish so
-  // they sit in the picture; people keep their hazard amber.
-  const CLAY = new THREE.Color('#ece8e0');
+  const groundCol = new THREE.Color('#0d0f12');
   function setPhoto(on, { look = 'photo' } = {}) {
-    photo.setVisible(on);
-    siteGroup?.traverse((o) => {
-      if (o.userData.surface) o.visible = !on;
-      const m = o.material;
-      if (!m?.color || !o.isMesh || o.userData.noClay) return;
-      const ob = o.parent?.userData?.obstacle ?? o.userData.obstacle;
-      if (!ob || ob.type === 'person' || ob.type === 'wire') return;
-      m.userData.baseColor ??= m.color.clone();
-      m.color.copy(on ? CLAY : m.userData.baseColor);
-      if ('roughness' in m) m.roughness = on ? 0.85 : 0.55;
-    });
+    photo.setVisible(on && !world);
+    // The picture already shows every real object: hide our boxes, people's
+    // keep-out rings and motion arrows. Only an obstacle a flight path fails
+    // on is drawn (red) on top.
+    for (const c of siteGroup?.children ?? []) c.userData.lookHidden = on && Boolean(c.userData.obstacle);
+    siteGroup?.traverse((o) => { if (o.userData.surface) o.visible = !on; });
+    for (const e of obstacles) for (const x of [e.ring, e.arrow, e.path]) if (x) x.visible = !on;
+    ground.material.color.copy(on ? new THREE.Color(PAVEMENT) : groundCol);
+    // The backdrop doesn't write depth, so the 600 m ground plane and grid
+    // beyond it would paint a grey band (and lines) across the horizon.
+    ground.visible = grid.visible = !on;
     photoLook = on ? look : 'model';
-    grid.material.opacity = on ? 0.25 : 0.7;
     scene.fog.near = on ? 120 : 55;
     scene.fog.far = on ? 400 : 150;
+    if (siteGroup) styleLabels();
   }
 
   const lineMats = new Set();
@@ -110,6 +126,9 @@ export function createScene(container, { onTap } = {}) {
   const car = buildFlyingCar();
   scene.add(car);
   const shadow = car.userData.shadow;
+  const youTag = label('You', 'you');
+  youTag.position.set(0, 1.9, 0);
+  car.add(youTag);
   scene.add(shadow);
 
   // ---------------------------------------------------------------- particles (thruster vapor)
@@ -234,8 +253,10 @@ export function createScene(container, { onTap } = {}) {
         ? toThree({ forward: (o.from.forward + o.to.forward) / 2, right: (o.from.right + o.to.right) / 2 }, Math.max(o.from.up, o.to.up) + 0.4)
         : toThree(o.center, (o.base_up ?? 0) + (o.shape === 'box' ? o.size.height : o.height) + 0.3);
       if (o.type !== 'tree_trunk') {
+        // Hidden by default; shown on hover or when the obstacle matters (styleLabels).
         const l = label(`<b>${esc(o.id)}</b> ${esc(o.label ?? o.type)}`, 'obj');
         l.center.set(0.5, 1);
+        l.visible = false;
         if (o.shape === 'wire') { l.position.copy(top); siteGroup.add(l); } else { l.position.set(0, top.y - obj.position.y, 0); obj.add(l); }
         e.label = l;
       }
@@ -243,6 +264,7 @@ export function createScene(container, { onTap } = {}) {
     }
     setObstacleTime(0);
     if (photo.visible) setPhoto(true, { look: photoLook });
+    styleLabels();
   }
 
   function setObstacleTime(t) {
@@ -257,7 +279,24 @@ export function createScene(container, { onTap } = {}) {
     }
   }
 
-  function highlight(ids) { highlightIds = new Set(ids ?? []); }
+  function highlight(ids) { highlightIds = new Set(ids ?? []); styleLabels(); }
+
+  // Obstacle labels: only the hovered one, the ones a selected/failed route
+  // hits, and people whose keep-out reaches the landing spot.
+  let hoverId = null;
+  let targetPt = null;
+  function styleLabels() {
+    for (const e of obstacles) {
+      if (!e.label) continue;
+      const { o } = e;
+      const hot = highlightIds.has(o.id);
+      const nearPerson = o.type === 'person' && Boolean(targetPt) && Boolean(o.center)
+        && Math.hypot(o.center.forward - targetPt.forward, o.center.right - targetPt.right) < SAFETY.pedestrianKeepOutM + 1.5;
+      const hidden = e.obj.userData.lookHidden && !hot;
+      e.label.visible = Boolean(!view.hop && !hidden && (hot || o.id === hoverId || nearPerson));
+      e.label.element.className = `label3d obj${hot ? ' hot' : nearPerson ? ' person' : ''}`;
+    }
+  }
 
   function updateObstacleFx(dt, time) {
     for (const e of obstacles) {
@@ -270,6 +309,7 @@ export function createScene(container, { onTap } = {}) {
         else { m.emissive.copy(base); m.emissiveIntensity = baseI; }
       }
       if (e.ringMat) e.ringMat.color.set(hot ? COLORS.unsafe : COLORS.amber);
+      if (e.ring && photoLook !== 'model') e.ring.visible = hot;
     }
   }
 
@@ -278,11 +318,11 @@ export function createScene(container, { onTap } = {}) {
   const tRing = new THREE.Mesh(new THREE.RingGeometry(SAFETY.landingToleranceM - 0.12, SAFETY.landingToleranceM, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.chosen, transparent: true, depthWrite: false }));
   const tPulse = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.chosen, transparent: true, depthWrite: false }));
   const tDisc = new THREE.Mesh(new THREE.CircleGeometry(SAFETY.landingToleranceM, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: COLORS.chosen, transparent: true, opacity: 0.1, depthWrite: false }));
-  const tBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 4, 6).translate(0, 2, 0), new THREE.MeshBasicMaterial({ color: COLORS.chosen, transparent: true, opacity: 0.5 }));
-  targetGroup.add(tRing, tPulse, tDisc, tBeam);
+  // No vertical beam: from the driver's seat a 4 m pole reads as a giant line.
+  targetGroup.add(tRing, tPulse, tDisc);
   targetGroup.position.y = 0.04;
   const tLabel = label('', 'target');
-  tLabel.position.set(0, 4.3, 0);
+  tLabel.position.set(0, 0.6, 0);
   targetGroup.add(tLabel);
   targetGroup.visible = false;
   scene.add(targetGroup);
@@ -307,6 +347,8 @@ export function createScene(container, { onTap } = {}) {
 
   function setTarget(t) {
     targetGroup.visible = Boolean(t);
+    targetPt = t ?? null;
+    styleLabels();
     if (!t) return;
     targetGroup.position.set(t.right, 0.04, -t.forward);
     tLabel.element.innerHTML = `${fmt(Math.hypot(t.forward, t.right), 1)} m`;
@@ -360,7 +402,7 @@ export function createScene(container, { onTap } = {}) {
   function updateCandidate(c) {
     const a = arcs.get(c.key);
     if (!a) return addCandidate(c);
-    Object.assign(a, { status: c.status, reason: c.reason, label_text: c.label_text });
+    Object.assign(a, { status: c.status, reason: c.reason, label_text: c.label_text, sim: c.sim ?? a.sim });
     styleArcs();
   }
 
@@ -392,12 +434,14 @@ export function createScene(container, { onTap } = {}) {
       if (chosen) ensureTube(a);
       if (a.tube) { a.tube.visible = chosen && visible; a.tubeGlow.visible = !hop; }
       if (a.marker) a.marker.visible = !hop && current && a.status === 'unsafe' && (!anySel || sel);
-      a.label.visible = current && !hop;
+      // Only the selected / chosen arc carries a text label (no overlapping fan of labels).
+      a.label.visible = current && !hop && (sel || chosen);
       const cls = chosen ? 'chosen' : a.status;
-      const text = chosen ? `${a.id} · chosen` : a.status === 'unsafe' ? `${a.id} · ${a.reason ?? 'unsafe'}` : `${a.id} · SAFE`;
-      a.label.element.className = `label3d ${cls}${anySel && !sel && !chosen ? ' dimmed' : ''}`;
+      const text = chosen ? `${a.id} · chosen` : a.status === 'unsafe' ? `${a.id} · ${shortReason(a.sim) ?? a.reason ?? 'unsafe'}` : `${a.id} · SAFE`;
+      a.label.element.className = `label3d ${cls}`;
       a.label.element.textContent = text;
     }
+    styleLabels();
   }
 
   function setPlanView(v) {
@@ -474,7 +518,17 @@ export function createScene(container, { onTap } = {}) {
     if (flying) emit(level, dt);
     setObstacleTime(Math.min(p.t, p.end));
     p.onTick?.(s, p.t);
-    if (p.chase) {
+    if (p.chase && world) {
+      // fixed camera: the generated picture only matches this pose
+    } else if (p.chase && viewName === 'pov') {
+      // Tripod shot: stay at the rig point (footage undistorted) and pan to
+      // follow the car; moving the eye would smear the projection.
+      const k = 1 - Math.exp(-dt * 4);
+      camera.position.lerp(new THREE.Vector3(...VIEWS.pov.pos), k);
+      const away = car.position.clone().setY(0).length();
+      const look = away < 3 ? new THREE.Vector3(...VIEWS.pov.target) : car.position.clone().add(new THREE.Vector3(0, 0.4, 0));
+      controls.target.lerp(look, k);
+    } else if (p.chase) {
       const desired = car.position.clone().add(new THREE.Vector3(2.5, 3.6 + car.position.y * 0.15, 10.5));
       const k = 1 - Math.exp(-dt * 3.5);
       camera.position.lerp(desired, k);
@@ -484,21 +538,28 @@ export function createScene(container, { onTap } = {}) {
       p.hold += dt;
       if (p.hold > 0.9) {
         play = null;
-        controls.enabled = true;
+        controls.enabled = !world;
         if (p.chase) setPlanView({ hop: false });
-        if (p.chase) controls.target.copy(car.position).add(new THREE.Vector3(0, 0.6, 0));
-        if (!p.keep) { car.rotation.set(0, 0, 0); placeCar({ forward: 0, right: 0, up: 0 }); setObstacleTime(0); }
+        if (p.chase && viewName !== 'pov') controls.target.copy(car.position).add(new THREE.Vector3(0, 0.6, 0));
+        if (!p.keep) {
+          car.rotation.set(0, 0, 0); placeCar({ forward: 0, right: 0, up: 0 }); setObstacleTime(0);
+          if (p.chase && viewName === 'pov') setView('pov');
+        }
         p.resolve();
       }
     }
   }
 
   function setView(name) {
-    const v = VIEWS[name] ?? VIEWS.overview;
+    viewName = VIEWS[name] ? name : 'overview';
+    const v = VIEWS[viewName];
+    applyViewMode();
     camTween.active = true;
     camTween.k = 0;
-    camTween.fromP.copy(camera.position); camTween.toP.set(...v.pos);
-    camTween.fromT.copy(controls.target); camTween.toT.set(...v.target);
+    // POV stays at the rig point: the only pose where the footage lines up.
+    const off = new THREE.Vector3();
+    camTween.fromP.copy(camera.position); camTween.toP.set(...v.pos).add(off);
+    camTween.fromT.copy(controls.target); camTween.toT.set(...v.target).add(off);
   }
 
   // Record the chase-cam hop as webm (for the Omni stretch, web/video-panel.js).
@@ -510,13 +571,63 @@ export function createScene(container, { onTap } = {}) {
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     const stopped = new Promise((r) => (rec.onstop = r));
     resetCar();
-    camera.position.set(2.5, 3.6, 10.5);
-    controls.target.set(0, 0.8, -7);
+    if (viewName === 'pov') { camera.position.set(...VIEWS.pov.pos); controls.target.set(...VIEWS.pov.target); }
+    else { camera.position.set(2.5, 3.6, 10.5); controls.target.set(0, 0.8, -7); }
     rec.start();
     await playRoute(sim, { chase: true, keep: true });
     rec.stop();
     await stopped;
     return new Blob(chunks, { type: 'video/webm' });
+  }
+
+  // ---------------------------------------------------------------- AI world view
+  // A photoreal picture generated for the fixed chase camera (server/worldview.js)
+  // replaces the projected footage as the backdrop; tiles, flight paths, the
+  // target and the car are still drawn in 3D on top, from the same camera.
+  let world = null; // {tex, fog}
+  const poseCamera = () => {
+    camera.position.set(...VIEWS.pov.pos);
+    controls.target.set(...VIEWS.pov.target);
+    camera.lookAt(controls.target);
+    camTween.active = false;
+  };
+  // Layout render for the image model: plain model look, only the street + car.
+  function captureGuide() {
+    const wasPhoto = photo.visible, look = photoLook;
+    if (wasPhoto) setPhoto(false);
+    const hidden = scene.children.filter((c) => c.visible && !c.isLight && c !== siteGroup && c !== ground && c !== car);
+    for (const c of hidden) c.visible = false;
+    const carWas = car.visible;
+    car.visible = true;
+    poseCamera();
+    renderer.render(scene, camera);
+    const url = renderer.domElement.toDataURL('image/jpeg', 0.92);
+    for (const c of hidden) c.visible = true;
+    car.visible = carWas;
+    if (wasPhoto) setPhoto(true, { look });
+    return url;
+  }
+  async function setWorldImage(url) {
+    if (!url) {
+      if (!world) return;
+      scene.background = new THREE.Color(BG);
+      scene.fog = world.fog;
+      world.tex.dispose();
+      world = null;
+      siteGroup.visible = ground.visible = grid.visible = true;
+      controls.enabled = !play;
+      return;
+    }
+    const tex = await new THREE.TextureLoader().loadAsync(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    if (world) world.tex.dispose();
+    world = { tex, fog: world?.fog ?? scene.fog };
+    scene.background = tex;
+    scene.fog = null;
+    photo.setVisible(false);
+    siteGroup.visible = ground.visible = grid.visible = false;
+    controls.enabled = false;
+    poseCamera();
   }
 
   // ---------------------------------------------------------------- input
@@ -538,6 +649,26 @@ export function createScene(container, { onTap } = {}) {
     if (Math.hypot(t.forward, t.right) < 3 || Math.abs(t.forward) > 80 || Math.abs(t.right) > 40) return;
     onTap?.(t);
   });
+
+  // Hover an obstacle to see its label.
+  let hoverQueued = null;
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (e.buttons || play) return;
+    if (!hoverQueued) requestAnimationFrame(() => { pickHover(hoverQueued); hoverQueued = null; });
+    hoverQueued = { x: e.clientX, y: e.clientY };
+  });
+  renderer.domElement.addEventListener('pointerleave', () => { if (hoverId) { hoverId = null; styleLabels(); } });
+  function pickHover(pt) {
+    if (!pt) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2(((pt.x - r.left) / r.width) * 2 - 1, -((pt.y - r.top) / r.height) * 2 + 1), camera);
+    const objs = obstacles.filter((e) => e.label && e.obj.visible).map((e) => e.obj);
+    const hit = ray.intersectObjects(objs, true)[0];
+    let o = hit?.object;
+    while (o && !o.userData.obstacle) o = o.parent;
+    const id = o?.userData.obstacle?.id ?? null;
+    if (id !== hoverId) { hoverId = id; styleLabels(); }
+  }
 
   // ---------------------------------------------------------------- loop
   function resize() {
@@ -578,22 +709,38 @@ export function createScene(container, { onTap } = {}) {
     }
     stepPlay(dt);
     stepParticles(dt);
+    car.userData.step?.(dt);
     updateObstacleFx(dt, time);
     if (!play) car.userData.setThrust(0);
+    // The AI picture already shows the parked car; draw ours once it moves.
+    // and in the cabin POV we're sitting in it.
+    if (world) car.visible = shadow.visible = Boolean(play) || car.position.lengthSq() > 0.01;
+    else car.visible = shadow.visible = viewName !== 'pov' || car.position.distanceTo(camera.position) > 2.5;
     controls.update();
     // Hide any obstacle the camera is inside (e.g. a tree canopy behind the car).
-    for (const c of siteGroup.children) if (c.userData.box) c.visible = !c.userData.box.containsPoint(camera.position);
+    for (const c of siteGroup.children) {
+      if (!c.userData.box) continue;
+      const shown = !c.userData.lookHidden || highlightIds.has(c.userData.obstacle?.id);
+      c.visible = shown && !c.userData.box.containsPoint(camera.position);
+    }
     renderer.render(scene, camera);
     labels.render(scene, camera);
   });
 
   placeCar({ forward: 0, right: 0, up: 0 });
+  applyViewMode();
 
   return {
-    setFootage: photo.setFootage, setPhoto, get photo() { return photo.visible; },
+    setFootage: photo.setFootage, setPhoto, captureGuide, setWorldImage, get world() { return Boolean(world); }, get photo() { return photo.visible; },
     setSite, setTarget, setZones, addCandidate, updateCandidate, setPlanView, clearPlan,
     playRoute, resetCar, setView, highlight, recordHop, setObstacleTime,
+    setCarVariant(v) {
+      car.userData.setVariant(v);
+      if (viewName === 'pov') setView('overview');
+    },
+    get carVariant() { return car.userData.variant; },
     get playing() { return Boolean(play); },
+    get view() { return viewName; },
     canvas: renderer.domElement,
   };
 }

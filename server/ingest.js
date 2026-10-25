@@ -70,6 +70,10 @@ async function ingestCamera(siteId, cam, src) {
   const dir = path.join(SITES_DIR, siteId);
   const mp4 = path.join(dir, `${cam.id}.mp4`);
   const png = path.join(dir, 'frames', `${cam.id}.png`);
+  let keyframe_t = readRun(siteId, 'keyframes.json')?.[cam.id] ?? null;
+  if (!src && fs.existsSync(mp4) && fs.existsSync(png)) {
+    return { id: cam.id, mp4_url: `/media/${siteId}/${cam.id}.mp4`, keyframe_url: `/media/${siteId}/frames/${cam.id}.png`, keyframe_t };
+  }
   fs.mkdirSync(path.dirname(png), { recursive: true });
 
   if (!fresh(mp4, src)) {
@@ -80,7 +84,6 @@ async function ingestCamera(siteId, cam, src) {
     ]);
   }
 
-  let keyframe_t = readRun(siteId, 'keyframes.json')?.[cam.id] ?? null;
   if (!fresh(png, mp4) || keyframe_t === null) {
     // Sharpest of 9 frames across the middle ±1 s (phone held still; pick the
     // least motion-blurred one).
@@ -101,15 +104,18 @@ export async function ingest({ siteId, rig, cameraSource }) {
   const jobs = rig.cameras
     .map((cam) => ({ cam, src: cameraSource(cam) }))
     .filter(({ cam, src }) => {
-      if (!src && !cam.optional) console.warn(`[ingest] ${siteId}: no footage for ${cam.id}`);
-      return src;
+      const preIngested = fs.existsSync(mp4Path(siteId, cam.id)) && fs.existsSync(keyframePath(siteId, cam.id));
+      if (!src && !preIngested && !cam.optional) console.warn(`[ingest] ${siteId}: no footage for ${cam.id}`);
+      return src || preIngested;
     });
   if (!jobs.length) throw new Error(`no footage in sites/${siteId}/ (expected front.mov, right.mov, back.mov, left.mov)`);
   const cameras = await Promise.all(jobs.map(({ cam, src }) => ingestCamera(siteId, cam, src)));
-  const timeline = await clipTimeline(jobs);
-  const kf = readRun(siteId, 'keyframes.json') ?? {};
-  for (const c of timeline.cameras) c.keyframe_t = kf[c.id] ?? null;
-  writeRun(siteId, 'clips.json', timeline);
+  if (jobs.every((j) => j.src)) {
+    const timeline = await clipTimeline(jobs);
+    const kf = readRun(siteId, 'keyframes.json') ?? {};
+    for (const c of timeline.cameras) c.keyframe_t = kf[c.id] ?? null;
+    writeRun(siteId, 'clips.json', timeline);
+  }
   return { cameras };
 }
 

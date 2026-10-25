@@ -4,85 +4,153 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>flyme</title>
-  <link rel="icon" href="data:," />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='36' y2='36' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0%25' stop-color='%231b263b'/%3E%3Cstop offset='100%25' stop-color='%230c1017'/%3E%3C/linearGradient%3E%3ClinearGradient id='jet' x1='18' y1='18' x2='18' y2='32' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0%25' stop-color='%2360a5fa'/%3E%3Cstop offset='100%25' stop-color='%233d8bff' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='36' height='36' rx='10' fill='url(%23bg)' stroke='%233d8bff' stroke-width='1.5' stroke-opacity='0.55'/%3E%3Cpath d='M10.5 20L8 30h5l1.5-8.5ZM25.5 20L28 30h-5l-1.5-8.5Z' fill='url(%23jet)'/%3E%3Cpath d='M18 6L30 19.5L25.5 22L18 15.2L10.5 22L6 19.5Z' fill='%23ffffff'/%3E%3Cpath d='M18 12.2L24 18.2L18 16.5L12 18.2Z' fill='%233d8bff'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Left: camera strip (cams.js) -->
-    <aside id="cams">
-      <div class="strip-head">
-        <span class="eyebrow">Cameras</span>
-        <span id="recon-round" class="pill dim">Reconstruction —</span>
-      </div>
-      <div class="seg" id="cam-mode">
-        <button data-mode="footage">Footage</button>
-        <button data-mode="render">Render</button>
-        <button data-mode="blend" class="on">Blend</button>
-      </div>
-      <label class="slider"><span class="dim">Render opacity</span><input id="blend" type="range" min="0" max="100" value="50" /></label>
-      <div id="tiles"></div>
-    </aside>
-
-    <!-- Center: 3D view (scene.js) -->
-    <main id="view">
-      <div id="hud-top">
-        <div id="site-name">—</div>
+    <!-- Top bar: brand + site, step flow, settings -->
+    <header id="topbar">
+      <div class="tb-left">
+        <div class="brand" aria-label="flyme">
+          <svg class="brand-logo" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="badgeBg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#1c273c"/>
+                <stop offset="100%" stop-color="#0b0e14"/>
+              </linearGradient>
+              <linearGradient id="thrusterGlow" x1="18" y1="19" x2="18" y2="32" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#5ce1ff"/>
+                <stop offset="55%" stop-color="#3d8bff" stop-opacity="0.75"/>
+                <stop offset="100%" stop-color="#3d8bff" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="wingShine" x1="6" y1="6" x2="30" y2="23" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#ffffff"/>
+                <stop offset="100%" stop-color="#cddbf0"/>
+              </linearGradient>
+            </defs>
+            <!-- Squircle metallic badge frame -->
+            <rect x="1" y="1" width="34" height="34" rx="9.5" fill="url(#badgeBg)" stroke="#3d8bff" stroke-opacity="0.5" stroke-width="1.5"/>
+            <!-- Twin cold-gas thruster vertical plumes -->
+            <path d="M10.5 20.5 L7.5 31.5 H13.5 L15 21.5 Z" fill="url(#thrusterGlow)"/>
+            <path d="M25.5 20.5 L28.5 31.5 H22.5 L21 21.5 Z" fill="url(#thrusterGlow)"/>
+            <!-- Bold delta flying-car chevron -->
+            <path d="M18 5.5 L30.5 19.2 L25.8 22.4 L18 15.4 L10.2 22.4 L5.5 19.2 Z" fill="url(#wingShine)"/>
+            <!-- Cockpit canopy facet -->
+            <path d="M18 10.5 L23.2 16.5 L18 14.8 L12.8 16.5 Z" fill="#0f1726"/>
+          </svg>
+          <span class="brand-name">fly<b>me</b></span>
+        </div>
+        <label class="site-sel" title="Street">
+          <select id="site-picker" aria-label="Street"></select>
+        </label>
         <div id="pills"></div>
       </div>
-      <div id="hint">Tap the ground to choose a landing spot (green = clear ground)</div>
-      <button id="suggest" hidden></button>
-      <div id="target-readout" hidden></div>
-      <div id="view-controls">
-        <button data-view="overview" title="Overview">Overview</button>
-        <button data-view="top" title="Top view">Top</button>
-        <button data-view="side" title="Side view">Side</button>
-        <div class="seg small-seg" id="look">
-          <button data-look="illustrated" title="Illustrated street (image model redraws each camera frame)">Illustrated</button>
-          <button data-look="photo" title="Real footage projected onto the 3D street">Photo</button>
-          <button data-look="model" title="Plain 3D model">Model</button>
+      <ol id="steps" aria-label="Progress">
+        <li data-step="scan"><span class="num">1</span><span class="lbl">Scan street</span></li>
+        <li data-step="pick"><span class="num">2</span><span class="lbl">Pick landing spot</span></li>
+        <li data-step="plan"><span class="num">3</span><span class="lbl">Plan flight</span></li>
+        <li data-step="hop"><span class="num">4</span><span class="lbl">Fly</span></li>
+      </ol>
+      <div class="tb-right">
+        <div class="seg mini" id="car-variant" title="Vehicle">
+          <button data-car="roadster" class="on" title="Flying Roadster coupe">Roadster</button>
+          <button data-car="waymo" title="Waymo I-PACE SUV with spinning roof LiDAR">Waymo</button>
+          <button data-car="ojai" title="6th-gen Waymo Ojai robotaxi minivan">Waymo Ojai</button>
+        </div>
+        <button id="btn-specs" class="tb-btn" title="Vehicle specs">Specs</button>
+      </div>
+    </header>
+
+    <!-- 3D view (scene.js) — the hero -->
+    <main id="view">
+
+      <!-- Camera drawer (cams.js) -->
+      <aside id="cams" class="open">
+        <button id="cams-toggle" class="cams-head" aria-expanded="true" title="Show / hide cameras">
+          <span class="cams-title">Cameras</span>
+          <span id="recon-round" class="pill dim">—</span>
+          <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+        <div class="cams-body">
+          <div id="tiles"></div>
+          <div class="cams-ctl">
+            <div class="seg mini" id="cam-mode">
+              <button data-mode="footage" class="on">Footage</button>
+              <button data-mode="render">Render</button>
+              <button data-mode="blend">Blend</button>
+            </div>
+            <input id="blend" type="range" min="0" max="100" value="50" aria-label="Render opacity" title="Render opacity" />
+          </div>
+        </div>
+      </aside>
+
+      <!-- Driver's-seat POV only: the projected footage smears from outside views. -->
+      <div id="view-controls" class="seg mini" title="Camera view" style="display:none">
+        <button data-view="pov" title="Driver's-seat view">Driver</button>
+      </div>
+
+      <!-- Action dock -->
+      <div id="dock">
+        <div id="hint"></div>
+        <div id="target-readout" hidden></div>
+        <div class="dock-row">
+          <button id="btn-primary" class="primary-btn"><span class="spin"></span><span class="txt">…</span></button>
+        </div>
+        <div class="dock-sec">
+          <button id="btn-replay" class="sec-btn" title="Fly the same flight path again">Replay flight</button>
+          <button id="btn-scan" class="sec-btn" title="Scan the street again (S)">Re-scan street</button>
+          <button id="btn-newspot" class="sec-btn" title="Clear the landing spot">New spot</button>
+          <button id="btn-replan" class="sec-btn" title="Plan again (P)">Plan again</button>
+          <button id="btn-video" class="sec-btn" disabled title="Photoreal video of the flight">Photoreal video</button>
         </div>
       </div>
       <div id="lightbox" hidden></div>
     </main>
 
-    <!-- Right: plan panel (panel.js) -->
+    <!-- Right: result card + details (panel.js) -->
     <aside id="panel">
-      <div id="plan-banner" class="banner idle">Tap a landing spot, then PLAN</div>
-      <div id="valid-banner" class="valid" hidden>Plan valid ~10 s — rescan before HOP</div>
-      <section id="arc">
-        <div id="verdict" class="verdict none">No route selected</div>
-        <div id="arc-title" class="dim"></div>
-        <ul id="checklist"></ul>
-        <div id="air"></div>
+      <section id="card" class="card idle">
+        <div id="card-kicker" class="kicker">Result</div>
+        <div id="plan-banner" class="verdict-big">—</div>
+        <div id="why-wrap">
+          <p id="why" class="why"></p>
+          <button id="why-more" class="link" hidden>more</button>
+        </div>
+        <div id="progress" hidden></div>
+        <div id="activity" hidden></div>
+        <div id="keynums" class="keynums"></div>
+        <div id="valid-banner" class="valid" hidden>Plan valid ~10 s — rescan before flying</div>
       </section>
-      <section id="rounds-wrap">
-        <div class="eyebrow">Rounds</div>
-        <div id="rounds"><div class="dim small">Each round the agent proposes 4 routes; our simulator checks all 4.</div></div>
-      </section>
-      <section id="log-wrap">
-        <div class="eyebrow">Agent log</div>
-        <div id="log"></div>
+
+      <details id="details">
+        <summary><span>Details</span><span class="dim small" id="details-sub">checks · air · flight paths · agent log</span></summary>
+        <div class="det-body">
+          <section id="arc" class="det-sec">
+            <div class="eyebrow">Selected flight path</div>
+            <div id="verdict" class="verdict none">No flight path selected</div>
+            <div id="arc-title" class="dim"></div>
+            <ul id="checklist"></ul>
+            <div id="air"></div>
+          </section>
+          <section id="rounds-wrap" class="det-sec">
+            <div class="eyebrow">Flight paths tried <span class="faint">· tap one to replay it</span></div>
+            <div id="rounds"></div>
+          </section>
+          <section id="log-wrap" class="det-sec">
+            <div class="eyebrow">Agent log</div>
+            <div id="log"></div>
+          </section>
+        </div>
+      </details>
+
+      <section id="street" class="street-card">
+        <div class="eyebrow">This street</div>
+        <div id="site-name">—</div>
+        <div id="status" class="status-line"></div>
+        <div id="eval-stat" hidden></div>
       </section>
     </aside>
-
-    <!-- Bottom bar (main.js) -->
-    <footer id="bar">
-      <select id="site-picker" aria-label="Site"></select>
-      <button id="btn-scan" class="big">SCAN</button>
-      <button id="btn-plan" class="big primary">PLAN</button>
-      <button id="btn-hop" class="big hop" disabled>HOP</button>
-      <button id="btn-video" class="big ghost" disabled title="Photoreal video (stretch)">VIDEO</button>
-      <div class="seg small-seg" id="plan-mode" title="Planner">
-        <button data-mode="search" class="on" title="Simulator searches 400 routes; Argon judges the safe ones against the footage">Search</button>
-        <button data-mode="agent" title="Managed Agent proposes routes and runs our simulator in its sandbox">Agent</button>
-        <button data-mode="local" title="Argon proposes 4 routes per round; our simulator checks them">Local</button>
-      </div>
-      <button id="btn-replay" class="toggle" title="Replay cached runs">Replay</button>
-      <button id="btn-specs" class="toggle" title="Vehicle specs">ⓘ Specs</button>
-      <div id="status" class="dim"></div>
-      <div id="eval-stat" hidden></div>
-    </footer>
   </div>
 
   <div id="specs-pop" hidden></div>

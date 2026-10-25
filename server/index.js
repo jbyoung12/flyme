@@ -134,6 +134,13 @@ app.post('/api/sites/:id/illustrate', async (req, res) => {
   if (illustrate) res.json(await illustrate({ siteId: req.params.id, rig: readRig(req.params.id) }));
 });
 
+// AI world view (visual only): photoreal picture from the chase camera, made
+// from our layout render (body.guide) + the camera keyframes; cached.
+app.post('/api/sites/:id/worldview', async (req, res) => {
+  const worldview = await need(res, 'worldview', 'worldview');
+  if (worldview) res.json(await worldview({ siteId: req.params.id, rig: readRig(req.params.id), guide: req.body?.guide, force: Boolean(req.body?.force) }));
+});
+
 // ---------------------------------------------------------------- A. ingest
 
 app.post('/api/sites/:id/ingest', async (req, res) => {
@@ -255,7 +262,9 @@ const vite = await createVite({
   root: path.join(ROOT, 'web'),
   appType: 'spa',
   // allowedHosts: Cloud Run serves us on *.run.app; Vite's dev host check would 403 it.
-  server: { middlewareMode: true, hmr: { server }, fs: { allow: [ROOT] }, allowedHosts: true },
+  // No live reload by default: with several people editing web/, HMR reloads wiped in-flight
+  // plans in open pages. FLYME_HMR=1 turns it back on.
+  server: { middlewareMode: true, hmr: process.env.FLYME_HMR === '1' ? { server } : false, fs: { allow: [ROOT] }, allowedHosts: true },
   logLevel: 'info',
 });
 app.use(vite.middlewares);

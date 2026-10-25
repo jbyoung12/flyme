@@ -257,6 +257,8 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
         });
       }
       const chosenId = idMap.get(d.chosen_id) ?? d.chosen_id;
+      // Keep the agent's wording consistent with the renumbered ids (r1a kept → r2d).
+      if (keptOrig && chosenId !== keptOrig && d.why) d.why = d.why.replaceAll(keptOrig, `${chosenId} (originally ${keptOrig})`).replace(`${chosenId} (originally ${keptOrig}) (originally ${keptOrig})`, `${chosenId} (originally ${keptOrig})`);
       const notes = rev.map((r) => `${r.label ?? r.id}: ${r.reason ?? ''}`).join(' · ') || null;
       rounds.push({ n: 1, candidates: cands1, decision: cands2 ? 'revise' : 'pick', chosen_id: cands2 ? null : chosenId, why: cands2 ? null : d.why, revision_notes: cands2 ? notes : null });
       if (cands2) rounds.push({ n: 2, candidates: cands2, decision: 'pick', chosen_id: chosenId, why: d.why, revision_notes: null });

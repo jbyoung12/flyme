@@ -8,7 +8,7 @@ export function createCams({ tilesEl, modeEl, blendEl, roundEl, lightboxEl }) {
   let cams = []; // [{id, mp4_url, keyframe_url}]
   let renders = {};
   let scores = {}; // id → {match_score, issues}
-  let mode = 'blend';
+  let mode = 'footage';
   let opacity = Number(blendEl.value) / 100;
   let lightboxId = null;
 
@@ -60,7 +60,8 @@ export function createCams({ tilesEl, modeEl, blendEl, roundEl, lightboxEl }) {
     const sc = scores[id];
     const op = c.keyframe_url || c.mp4_url ? renderOpacity() : mode === 'footage' ? 0 : 1;
     lightboxEl.innerHTML = `<div class="frame">${footageHTML(c)}${renders[id] ? `<img class="render" src="${renders[id]}" style="opacity:${op}" alt="" />` : ''}</div>
-      <div class="cap"><b>${esc(id)}</b>${sc ? ` · match ${sc.match_score}/100` : ''} · ${esc(mode)} — tap to close</div>`;
+      <div class="cap"><b>${esc(id)}</b>${sc ? ` · match ${sc.match_score}/100` : ''} · ${esc(mode)} — tap to close</div>
+      ${sc?.issues?.length ? `<ul class="cap-issues">${sc.issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}`;
     lightboxEl.hidden = false;
   }
 
@@ -101,7 +102,8 @@ export function createCams({ tilesEl, modeEl, blendEl, roundEl, lightboxEl }) {
     },
     clearScores() { scores = {}; draw(); },
     setRound(n, { done = false, busy = false } = {}) {
-      roundEl.textContent = n == null ? 'Reconstruction —' : `Reconstruction round ${n}/${MAX_CRITIQUE_ROUNDS}${done ? ' · verified' : ''}`;
+      roundEl.textContent = n == null ? 'not scanned' : busy ? (n ? `Round ${n}/${MAX_CRITIQUE_ROUNDS}…` : 'Rebuilding…') : done && n > 0 ? `✓ Matches footage` : `Round ${n}/${MAX_CRITIQUE_ROUNDS}`;
+      roundEl.title = `Loop 1: Argon compares our renders with the footage and patches the 3D street${done && n > 0 ? ` — verified after ${n} of up to ${MAX_CRITIQUE_ROUNDS} rounds` : ''}`;
       roundEl.className = `pill ${done ? 'ok' : busy ? 'live' : 'dim'}`;
     },
   };

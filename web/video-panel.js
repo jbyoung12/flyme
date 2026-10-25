@@ -34,8 +34,8 @@ function ensureModal() {
     <div style="background:#111318;border:1px solid #262b36;border-radius:14px;max-width:960px;width:100%;padding:20px 24px;box-shadow:0 24px 64px rgba(0,0,0,0.65)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div>
-          <div style="font-size:16px;font-weight:600;letter-spacing:0.01em">Photoreal Hop Synthesis · <span style="color:#60a5fa">gemini-omni-1.1-flash</span></div>
-          <div id="omni-sub" style="font-size:12px;color:#9ca3af;margin-top:2px">Captures 3D chase-cam hop render + street keyframe → photoreal MP4</div>
+          <div style="font-size:16px;font-weight:600;letter-spacing:0.01em">Photoreal Flight Synthesis · <span style="color:#60a5fa">gemini-omni-1.1-flash</span></div>
+          <div id="omni-sub" style="font-size:12px;color:#9ca3af;margin-top:2px">Captures 3D chase-cam flight render + street keyframe → photoreal MP4</div>
         </div>
         <button id="omni-close" style="background:#1f2430;border:1px solid #32394a;color:#e5e7eb;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px">✕ Close</button>
       </div>
@@ -50,7 +50,7 @@ function ensureModal() {
           <video id="omni-out-vid" controls loop autoplay playsinline style="width:100%;aspect-ratio:16/9;background:#07080a;border-radius:6px;display:none"></video>
           <div id="omni-placeholder" style="width:100%;aspect-ratio:16/9;background:#07080a;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#9ca3af;font-size:13px;text-align:center;padding:16px">
             <div id="omni-spinner" style="width:28px;height:28px;border:3px solid #262b36;border-top-color:#3b82f6;border-radius:50%;animation:omni-spin 0.9s linear infinite;margin-bottom:10px"></div>
-            <div id="omni-status-text">Recording 3D hop from viewport…</div>
+            <div id="omni-status-text">Recording 3D flight from viewport…</div>
           </div>
         </div>
       </div>
@@ -58,7 +58,7 @@ function ensureModal() {
       <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#9ca3af">
         <div id="omni-footer-msg">No Tesla logos · generic white cold-gas thruster coupe</div>
         <div style="display:flex;gap:10px">
-          <a id="omni-download" href="#" download="flyme-hop.mp4" style="display:none;background:#1e3a8a;color:#eff6ff;text-decoration:none;padding:6px 12px;border-radius:7px;font-weight:500">Download MP4</a>
+          <a id="omni-download" href="#" download="flyme-flight.mp4" style="display:none;background:#1e3a8a;color:#eff6ff;text-decoration:none;padding:6px 12px;border-radius:7px;font-weight:500">Download MP4</a>
         </div>
       </div>
     </div>
@@ -79,7 +79,7 @@ function ensureModal() {
 
 let prevRenderBlobUrl = null;
 
-export async function openVideoPanel({ siteId, site, chosen, recordHop, log } = {}) {
+export async function openVideoPanel({ siteId, site, chosen, carVariant = 'roadster', recordHop, log } = {}) {
   const modal = ensureModal();
   modal.style.display = 'flex';
 
@@ -102,8 +102,8 @@ export async function openVideoPanel({ siteId, site, chosen, recordHop, log } = 
   };
 
   try {
-    setStatus('Recording 3D chase-cam hop from canvas…');
-    log?.('video: recording 3D chase-cam hop…');
+    setStatus('Recording 3D chase-cam flight from canvas…');
+    log?.('video: recording 3D chase-cam flight…');
 
     let clipDataUrl = null;
     if (typeof recordHop === 'function') {
@@ -129,7 +129,8 @@ export async function openVideoPanel({ siteId, site, chosen, recordHop, log } = 
         keyframe_cam: 'front',
         site,
         params: chosen?.params ?? chosen?.sim?.params ?? null,
-        label: chosen?.label ?? 'climb-first hop',
+        label: chosen?.label ?? 'climb-first flight',
+        car_variant: carVariant,
       }),
     });
 
