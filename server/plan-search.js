@@ -12,6 +12,7 @@ import { clampParams, validateAgentResult } from '../shared/schema.js';
 import { prepareObstacles, carToObstacleClearance3D, carToPersonHorizontalDistance2D } from '../shared/geometry.js';
 import { searchRoutesParallel, simulateMany, reachCells, refineSafe } from './search-pool.js';
 import { streamInteraction, parseJson, loadPrompt, fill } from './gemini.js';
+import { agentJudge } from './agent-judge.js';
 import { keyframePath } from './ingest.js';
 import { DEFAULT_RIG } from '../shared/constants.js';
 
@@ -173,7 +174,7 @@ function roundCandidate(id, label, e) {
   return { id, label, params: e.params, sim_verdict: e.sim.verdict, failures: e.sim.failures, margins: e.margins, sim: e.sim };
 }
 
-export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_RIG, wait_s: waitS = 0 }, sse) {
+export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_RIG, wait_s: waitS = 0, judgeWith = 'agent' }, sse) {
   const site = siteAfter(siteNow, waitS);
   if (waitS) sse.log(`planning for departure in ${waitS} s: moving people and cars advanced by their velocity`);
   sse.status('simulator: searching 400 route shapes to the landing spot');
@@ -230,24 +231,62 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
   const rounds = [];
   const safeCards = (cands) => cands.filter((c) => c.sim_verdict === 'SAFE').map((c) => card(c.id, c.label, entries.get(c.id), site));
   checkOpen(sse);
-  const v1 = await judge({ siteId, site, target, rig, cards: safeCards(cands1), round: 1, mustPick: false }, sse);
-  let decision = v1;
-  rounds.push({ n: 1, candidates: cands1, decision: v1.decision === 'revise' ? 'revise' : 'pick', chosen_id: v1.decision === 'revise' ? null : v1.chosen_id, why: v1.why, revision_notes: v1.decision === 'revise' ? v1.revised.map((r) => `${r.label}: ${r.reason}`).join(' · ') : null });
+  let decision = null;
+  const disagreements = [];
+  if (judgeWith === 'agent') {
+    try {
+      const d = await agentJudge({ siteId, site, target, rig, cards: safeCards(cands1) }, sse);
+      // Re-simulate every route the agent designed (D8); its ids map to r2a–r2d.
+      const keptOrig = /^r1[a-d]$/.test(d.chosen_id ?? '') && entries.has(d.chosen_id) ? d.chosen_id : null;
+      // Keep room for the original the agent chose so round 2 holds the pick.
+      const rev = (d.revised ?? []).filter((r) => r?.params).slice(0, keptOrig ? 3 : 4);
+      const idMap = new Map(cands1.map((c) => [c.id, c.id]));
+      let cands2 = null;
+      if (rev.length) {
+        const sims = await simulateMany(site, rev.map((r) => clampParams({ ...r.params, target }).params).filter(Boolean));
+        const rows = sims.map((e, i) => ({ e, label: rev[i].label ?? labelFor(e.params), claim: rev[i].sim_verdict, agentId: rev[i].id }));
+        if (keptOrig) rows.push({ e: entries.get(keptOrig), label: `${cands1.find((c) => c.id === keptOrig).label} (kept)`, agentId: keptOrig });
+        for (const c of cands1) if (rows.length < 4 && c.id !== keptOrig) rows.push({ e: entries.get(c.id), label: `${c.label} (kept)`, agentId: `kept-${c.id}` });
+        cands2 = rows.map(({ e, label, claim, agentId }, i) => {
+          const id = `r2${ROUND_IDS[i]}`;
+          idMap.set(agentId ?? id, id);
+          entries.set(id, e);
+          if (claim && claim !== e.sim.verdict) disagreements.push({ id, agent: claim, server: e.sim.verdict });
+          sse.send('attempt', { round: 2, id, label, params: e.params, sim: e.sim, agent_claim: { sim_verdict: claim ?? e.sim.verdict, failures: e.sim.failures }, disagrees: Boolean(claim && claim !== e.sim.verdict) });
+          return roundCandidate(id, label, e);
+        });
+      }
+      const chosenId = idMap.get(d.chosen_id) ?? d.chosen_id;
+      const notes = rev.map((r) => `${r.label ?? r.id}: ${r.reason ?? ''}`).join(' · ') || null;
+      rounds.push({ n: 1, candidates: cands1, decision: cands2 ? 'revise' : 'pick', chosen_id: cands2 ? null : chosenId, why: cands2 ? null : d.why, revision_notes: cands2 ? notes : null });
+      if (cands2) rounds.push({ n: 2, candidates: cands2, decision: 'pick', chosen_id: chosenId, why: d.why, revision_notes: null });
+      decision = { chosen_id: chosenId, why: d.why, semantic_notes: d.semantic_notes ?? [] };
+    } catch (err) {
+      if (sse.closed) throw err;
+      sse.log(`Managed Agent judge failed (${err.message}); falling back to a direct Argon judge`);
+      rounds.length = 0;
+    }
+  }
+  if (!decision) {
+    const v1 = await judge({ siteId, site, target, rig, cards: safeCards(cands1), round: 1, mustPick: false }, sse);
+    decision = v1;
+    rounds.push({ n: 1, candidates: cands1, decision: v1.decision === 'revise' ? 'revise' : 'pick', chosen_id: v1.decision === 'revise' ? null : v1.chosen_id, why: v1.why, revision_notes: v1.decision === 'revise' ? v1.revised.map((r) => `${r.label}: ${r.reason}`).join(' · ') : null });
 
-  if (v1.decision === 'revise' && v1.revised?.length) {
-    // Re-simulate Argon's revised routes; fill the round with the best originals.
-    const revisedParams = v1.revised.slice(0, 4).map((r) => clampParams({ target, ...Object.fromEntries(SHAPE_KEYS.map((k) => [k, r[k]])) }).params).filter(Boolean);
-    const sims = await simulateMany(site, revisedParams);
-    const pool2 = sims.map((e, i) => ({ e, label: v1.revised[i].label }));
-    for (const c of cands1) if (pool2.length < 4) pool2.push({ e: entries.get(c.id), label: `${c.label} (kept)` });
-    const cands2 = pool2.slice(0, 4).map(({ e, label }, i) => {
-      const id = `r2${ROUND_IDS[i]}`; entries.set(id, e); sendAttempt(sse, 2, id, label, e);
-      return roundCandidate(id, label, e);
-    });
-    const safe2 = cands2.filter((c) => c.sim_verdict === 'SAFE');
-    sse.log(`simulator: ${safe2.length} of ${cands2.length} round-2 routes are SAFE`);
-    decision = await judge({ siteId, site, target, rig, cards: safe2.length ? safeCards(cands2) : safeCards(cands1), round: 2, mustPick: true }, sse);
-    rounds.push({ n: 2, candidates: cands2, decision: 'pick', chosen_id: decision.chosen_id, why: decision.why, revision_notes: null });
+    if (v1.decision === 'revise' && v1.revised?.length) {
+      // Re-simulate Argon's revised routes; fill the round with the best originals.
+      const revisedParams = v1.revised.slice(0, 4).map((r) => clampParams({ target, ...Object.fromEntries(SHAPE_KEYS.map((k) => [k, r[k]])) }).params).filter(Boolean);
+      const sims = await simulateMany(site, revisedParams);
+      const pool2 = sims.map((e, i) => ({ e, label: v1.revised[i].label }));
+      for (const c of cands1) if (pool2.length < 4) pool2.push({ e: entries.get(c.id), label: `${c.label} (kept)` });
+      const cands2 = pool2.slice(0, 4).map(({ e, label }, i) => {
+        const id = `r2${ROUND_IDS[i]}`; entries.set(id, e); sendAttempt(sse, 2, id, label, e);
+        return roundCandidate(id, label, e);
+      });
+      const safe2 = cands2.filter((c) => c.sim_verdict === 'SAFE');
+      sse.log(`simulator: ${safe2.length} of ${cands2.length} round-2 routes are SAFE`);
+      decision = await judge({ siteId, site, target, rig, cards: safe2.length ? safeCards(cands2) : safeCards(cands1), round: 2, mustPick: true }, sse);
+      rounds.push({ n: 2, candidates: cands2, decision: 'pick', chosen_id: decision.chosen_id, why: decision.why, revision_notes: null });
+    }
   }
 
   const chosen = entries.get(decision.chosen_id);
@@ -257,11 +296,11 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
     last.decision = 'reject';
     last.chosen_id = null;
     return { verdict: 'REJECT', rounds, final_params: null, chosen_id: null, semantic_notes: decision.semantic_notes ?? [],
-      reject_reason: decision.why || 'Argon found no acceptable route among the simulator-SAFE ones.', disagreements: [], search: { tried: found.tried, safe: found.safe.length } };
+      reject_reason: decision.why || 'Argon found no acceptable route among the simulator-SAFE ones.', disagreements, search: { tried: found.tried, safe: found.safe.length } };
   }
   const out = {
     verdict: 'SAFE', rounds, final_params: chosen.params, chosen_id: decision.chosen_id, wait_s: waitS || null,
-    semantic_notes: decision.semantic_notes ?? [], reject_reason: null, disagreements: [],
+    semantic_notes: decision.semantic_notes ?? [], reject_reason: null, disagreements,
     search: { tried: found.tried, safe: found.safe.length },
   };
   const v = validateAgentResult(out);

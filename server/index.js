@@ -191,13 +191,15 @@ app.post('/api/plan', async (req, res) => {
   const { site_id: siteId, site: inSite, target, mode = 'agent' } = req.body ?? {};
   if (!SITE_ID.test(siteId ?? '')) return res.status(400).json({ error: 'site_id required' });
   if (isReplay(req)) return replaySSE(res, siteId, bestPlanReplay(siteId, target));
-  const [modName, fn] = { local: ['plan-local', 'planLocal'], search: ['plan-search', 'planSearch'] }[mode] ?? ['plan-agent', 'planAgent'];
+  // search (default): simulator search + Managed Agent judge; quick: same search with a direct Argon judge;
+  // agent: Managed Agent proposes routes itself; local: Argon proposes, server simulates.
+  const [modName, fn] = { local: ['plan-local', 'planLocal'], search: ['plan-search', 'planSearch'], quick: ['plan-search', 'planSearch'] }[mode] ?? ['plan-agent', 'planAgent'];
   const plan = await need(res, modName, fn);
   if (!plan) return;
   const ts = Date.now();
   await stream(req, res, { stage: 'plan', siteId, eventsName: `plan-${ts}.events.jsonl` }, async (sse) => {
     const site = normalizeSite(inSite ?? latestSite(siteId));
-    const result = await plan({ siteId, site, target, ts, rig: readRig(siteId), wait_s: Number(req.body?.wait_s) || 0 }, sse);
+    const result = await plan({ siteId, site, target, ts, rig: readRig(siteId), wait_s: Number(req.body?.wait_s) || 0, judgeWith: mode === 'quick' ? 'argon' : 'agent' }, sse);
     writeRun(siteId, `plan-${ts}.result.json`, result);
     sse.send('plan', result);
   });
