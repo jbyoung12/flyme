@@ -113,6 +113,15 @@ async function judge({ siteId, site, target, rig = DEFAULT_RIG, cards, round, mu
   return parseJson(text, 'plan-search judge');
 }
 
+// Representative shapes for the cheap "is anything SAFE?" probes (nearby
+// spots, departure delays): 18 shapes instead of the full 400.
+const PROBE_SHAPES = shapeGrid({ full: false }).filter((x) => x.climb_bias === 0.45 && x.vertical_drop === 0 && x.duration_s !== 4.2);
+
+// The browser went away (new tap, page reload): stop burning CPU on it.
+function checkOpen(sse) {
+  if (sse.closed) throw new Error('client disconnected; plan cancelled');
+}
+
 // ---------------------------------------------------------------- snap
 
 async function suggestNearby(site, target, sse) {
@@ -120,11 +129,12 @@ async function suggestNearby(site, target, sse) {
   const cells = zone.cells
     .filter((c) => c.ok && Math.hypot(c.forward - target.forward, c.right - target.right) <= 4.5)
     .sort((a, b) => Math.hypot(a.forward - target.forward, a.right - target.right) - Math.hypot(b.forward - target.forward, b.right - target.right))
-    .slice(0, 12)
+    .slice(0, 8)
     .map(({ forward, right }) => ({ forward, right }));
   if (!cells.length) return null;
   sse.status(`no safe route to the exact spot — checking ${cells.length} spots within 4.5 m`);
-  const res = await reachCells(site, cells);
+  checkOpen(sse);
+  const res = await reachCells(site, cells, PROBE_SHAPES);
   const ok = res.filter((r) => r.safe)
     .map((r) => ({ ...r.target, offset_m: +Math.hypot(r.target.forward - target.forward, r.target.right - target.right).toFixed(1) }))
     .sort((a, b) => a.offset_m - b.offset_m);
@@ -142,12 +152,12 @@ export function siteAfter(site, wait) {
 }
 
 // People/cars are what block the hop → find the shortest departure delay
-// (2–20 s) after which some route is SAFE.
+// (3–20 s) after which some route is SAFE.
 async function suggestWait(site, target, sse) {
-  const shapes = shapeGrid({ full: false });
   sse.status('people are in the way — checking whether waiting a few seconds clears the route');
-  for (let wait = 2; wait <= 20; wait += 2) {
-    const res = await simulateMany(siteAfter(site, wait), shapes.map((sh) => ({ target, ...sh })));
+  for (const wait of [3, 6, 10, 15, 20]) {
+    checkOpen(sse);
+    const res = await simulateMany(siteAfter(site, wait), PROBE_SHAPES.map((sh) => ({ target, ...sh })));
     if (res.some((e) => e.sim.verdict === 'SAFE')) return wait;
   }
   return null;
@@ -170,6 +180,7 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
   const t0 = Date.now();
   const found = await searchRoutesParallel(site, target);
   sse.log(`simulator: ${found.safe.length} of ${found.tried} route shapes are SAFE (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+  checkOpen(sse);
   if (found.safe.length) {
     const before = Math.max(...found.safe.map((e) => e.margins.min_clearance_m));
     found.safe = await refineSafe(site, found.safe);
@@ -218,6 +229,7 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
   });
   const rounds = [];
   const safeCards = (cands) => cands.filter((c) => c.sim_verdict === 'SAFE').map((c) => card(c.id, c.label, entries.get(c.id), site));
+  checkOpen(sse);
   const v1 = await judge({ siteId, site, target, rig, cards: safeCards(cands1), round: 1, mustPick: false }, sse);
   let decision = v1;
   rounds.push({ n: 1, candidates: cands1, decision: v1.decision === 'revise' ? 'revise' : 'pick', chosen_id: v1.decision === 'revise' ? null : v1.chosen_id, why: v1.why, revision_notes: v1.decision === 'revise' ? v1.revised.map((r) => `${r.label}: ${r.reason}`).join(' · ') : null });
