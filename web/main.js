@@ -480,13 +480,13 @@ async function plan({ wait_s = 0 } = {}) {
     return;
   }
   resetPlan();
-  S.statusMsg = wait_s ? `Waiting ${wait_s} s for people to clear, then planning…` : ({ agent: 'Starting the Managed Agent…', search: 'Simulator searching 400 flight paths…', quick: 'Simulator searching 400 flight paths…' })[S.mode] ?? 'Argon proposing 4 flight paths…';
+  S.statusMsg = wait_s ? `Waiting ${wait_s} s for people to clear, then planning…` : ({ agent: 'Starting the Managed Agent…', search: 'Simulator searching 800 flight paths…', quick: 'Simulator searching 800 flight paths…' })[S.mode] ?? 'Argon proposing 4 flight paths…';
   setBusy('plan');
   panel.log('log', { message: `— PLAN → ${fmt(Math.abs(S.target.forward), 1)} m ${S.target.forward < 0 ? 'behind' : 'ahead'}, ${fmt(Math.abs(S.target.right), 1)} m ${S.target.right < 0 ? 'left' : 'right'} (${S.mode}) —` });
   panel.banner('busy', 'Planning…', ({
     agent: 'The Managed Agent proposes every flight path itself and tests them in our simulator (~2 min). Only paths our simulator passes can be picked.',
-    search: 'Our simulator searches 400 flight paths (~4 s). Then the Managed Agent looks at the camera photos, tests its own paths in the simulator, and picks one (~90 s).',
-    quick: 'Our simulator searches 400 flight paths; Argon picks one of the safe ones (~30 s).',
+    search: 'Our simulator searches 800 flight paths (~6 s). Then the Managed Agent looks at the camera photos, tests its own paths in the simulator, and picks one (~90 s).',
+    quick: 'Our simulator searches 800 flight paths; Argon picks one of the safe ones (~30 s).',
   })[S.mode] ?? 'Argon proposes 4 flight paths per round; our simulator checks each one.', { kicker: 'Step 3 · Plan' });
   const mock = S.target.forward > 35 ? 'plan-reject' : 'plan';
   try {
@@ -562,7 +562,8 @@ async function showFootage() {
   let look = LOOK;
   if (look === 'illustrated' && !hasIllus) look = hasPhoto ? 'photo' : 'model';
   if ((look === 'photo' || look === 'blend') && !hasPhoto) look = 'model';
-  const media = S.media.map((m) => ({ id: m.id, keyframe_url: look === 'illustrated' ? m.illustrated_url : m.keyframe_url }));
+  // Photo: the full-res keyframe (server/ingest.js hiKeyframe) when there is one.
+  const media = S.media.map((m) => ({ id: m.id, keyframe_url: look === 'illustrated' ? m.illustrated_url : m.keyframe_hi_url ?? m.keyframe_url }));
   const ok = look !== 'model' && await scene.setFootage(S.rig, media, S.site?.camera_horizons).catch(() => false);
   const activeLook = ok ? look : 'model';
   scene.setPhoto(Boolean(ok), { look: activeLook });

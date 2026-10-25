@@ -66,22 +66,25 @@ export function createPanel({ cardEl, kickerEl, bannerEl, whyEl, whyMoreEl, prog
     if (!act) return;
     const secs = Math.round((performance.now() - act.t0) / 1000);
     activityEl.hidden = false;
-    activityEl.innerHTML = [
+    const rows = [
       act.thought ? `<div class="act-thought"><div class="act-lbl">Managed Agent is thinking</div><div class="act-tx">${esc(act.thought)}</div></div>` : '',
-      act.tool ? `<div class="act-row tool live"><span class="ic">›_</span><span class="tx">${esc(act.tool.text)}${act.tool.code ? ` <code>${esc(act.tool.code)}</code>` : ''}</span></div>` : '',
+      act.tool ? `<div class="act-row tool"><span class="ic">›_</span><span class="tx">${esc(act.tool.text)}${act.tool.code ? ` <code>${esc(act.tool.code)}</code>` : ''}</span></div>` : '',
       act.sim ? `<div class="act-row sim"><span class="ic">✓</span><span class="tx" title="${esc(act.sim)}">${esc(act.sim)}</span></div>` : '',
-      `<div class="act-meta">Managed Agent · ${act.n} step${act.n === 1 ? '' : 's'} · ${secs} s</div>`,
     ].join('');
+    // Rebuild rows only when they change (the fade-in replays on every rebuild); the 1 s tick only touches the timer.
+    if (rows !== act.rows) {
+      act.rows = rows;
+      activityEl.innerHTML = `${rows}<div class="act-meta"></div>`;
+    }
+    activityEl.querySelector('.act-meta').textContent = `Managed Agent · ${act.n} step${act.n === 1 ? '' : 's'} · ${secs} s`;
   }
 
   function setWhy(text) {
     whyEl.textContent = text ?? '';
     whyEl.classList.remove('open');
     whyEl.hidden = !text;
+    // Always show the full text: the card has room, and more/less was noise.
     whyMoreEl.hidden = true;
-    whyMoreEl.textContent = 'more';
-    // show "more" only when the clamp actually truncates
-    requestAnimationFrame(() => { whyMoreEl.hidden = !text || whyEl.scrollHeight <= whyEl.clientHeight + 2; });
   }
   whyMoreEl.addEventListener('click', () => {
     const open = whyEl.classList.toggle('open');
