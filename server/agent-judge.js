@@ -9,7 +9,10 @@ import { client, MODEL, recordInteraction, parseJson, loadPrompt, fill } from '.
 import { AGENT_NAME, buildSimSources } from './plan-agent.js';
 import { keyframePath } from './ingest.js';
 
-const TIMEOUT_MS = 6 * 60_000;
+// Finished runs take 65–120 s; past 3 min the Argon judge takes over (plan-search.js).
+const TIMEOUT_MS = 3 * 60_000;
+const IDLE_MS = 75_000; // no stream events this long → fall back to polling
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function download(envId, rel) {
@@ -69,9 +72,26 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
   };
   try {
     const stream = await client().interactions.get(ix.id, { stream: true });
-    for await (const ev of stream) {
+    const it = stream[Symbol.asyncIterator]();
+    let lastEv = Date.now(), pending = null;
+    while (true) {
+      // Race each event against a 2 s tick: a stream that goes silent must not
+      // hang the run (seen 2026-10-25: 678 s with no events, no timeout).
+      // Keep one next() in flight across ticks so no event is dropped.
+      pending ??= it.next();
+      let tick;
+      const next = await Promise.race([pending, new Promise((r) => { tick = setTimeout(() => r(null), 2000); })]);
+      clearTimeout(tick);
+      if (next) pending = null;
       if (Date.now() - t0 > TIMEOUT_MS) throw new Error('timeout');
       if (sse.closed) throw new Error('client disconnected');
+      if (!next) {
+        if (Date.now() - lastEv > IDLE_MS) { it.return?.().catch(() => {}); throw new Error('stream idle'); }
+        continue;
+      }
+      if (next.done) break;
+      lastEv = Date.now();
+      const ev = next.value;
       if (ev.event_type === 'step.start' && ev.step) { flush(); onStep(ev.step); }
       else if (ev.event_type === 'step.delta' && ev.delta?.type === 'thought_summary') thought += ev.delta.content?.text ?? '';
       else if (ev.event_type === 'step.stop') flush();
@@ -87,7 +107,10 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
   flush();
   ix = await client().interactions.get(ix.id);
   while (['in_progress', 'queued'].includes(ix.status)) {
-    if (Date.now() - t0 > TIMEOUT_MS) throw new Error('Managed Agent judge timeout');
+    if (Date.now() - t0 > TIMEOUT_MS || sse.closed) {
+      try { await client().interactions.cancel(ix.id); } catch { /* ignore */ }
+      throw new Error(sse.closed ? 'Managed Agent judge client disconnected' : 'Managed Agent judge timeout');
+    }
     await sleep(1500);
     ix = await client().interactions.get(ix.id);
   }
