@@ -117,6 +117,7 @@ export function createCams({ tilesEl, modeEl, blendEl, roundEl, lightboxEl }) {
     },
     clearScores() { scores = {}; draw(); },
     setRound(n, { done = false, busy = false } = {}) {
+      roundEl.hidden = true; // scan progress already shows in the step bar and status line
       roundEl.textContent = n == null ? 'not scanned' : busy ? (n ? `Round ${n}/${MAX_CRITIQUE_ROUNDS}…` : 'Rebuilding…') : done && n > 0 ? `✓ Matches footage` : `Round ${n}/${MAX_CRITIQUE_ROUNDS}`;
       roundEl.title = `Loop 1: Argon compares our renders with the footage and patches the 3D street${done && n > 0 ? ` — verified after ${n} of up to ${MAX_CRITIQUE_ROUNDS} rounds` : ''}`;
       roundEl.className = `pill ${done ? 'ok' : busy ? 'live' : 'dim'}`;
