@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
-import { SITES_DIR } from './runs.js';
+import { SITES_DIR, writeRun } from './runs.js';
 
 const W = 1280, H = 720; // matches the loop-1 render size
 const PROBE_W = 320, PROBE_H = 180; // sharpness is measured on a small gray frame
@@ -55,6 +55,15 @@ async function sharpness(file, t) {
   return stdout.length >= PROBE_W * PROBE_H ? laplacianVariance(stdout, PROBE_W, PROBE_H) : -1;
 }
 
+// iPhone records 10-bit HLG HDR by default; map to SDR bt709 or frames look
+// washed out to both the model and the UI.
+const TONEMAP = 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p';
+
+async function isHdr(file) {
+  const { stderr } = await ffmpeg(['-i', file, '-f', 'null', '-t', '0', '-']);
+  return /arib-std-b67|smpte2084|bt2020/.test(stderr);
+}
+
 const fresh = (out, src) => fs.existsSync(out) && fs.statSync(out).mtimeMs >= fs.statSync(src).mtimeMs;
 
 async function ingestCamera(siteId, cam, src) {
@@ -66,7 +75,7 @@ async function ingestCamera(siteId, cam, src) {
   if (!fresh(mp4, src)) {
     await ffmpeg([
       '-i', src, '-an',
-      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,fps=30`,
+      '-vf', `${(await isHdr(src)) ? `${TONEMAP},` : ''}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,fps=30`,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4,
     ]);
   }
@@ -96,7 +105,28 @@ export async function ingest({ siteId, rig, cameraSource }) {
     });
   if (!jobs.length) throw new Error(`no footage in sites/${siteId}/ (expected front.mov, right.mov, back.mov, left.mov)`);
   const cameras = await Promise.all(jobs.map(({ cam, src }) => ingestCamera(siteId, cam, src)));
+  writeRun(siteId, 'clips.json', await clipTimeline(jobs));
   return { cameras };
+}
+
+// Clips are filmed one after another (D22). Recover the order and timing from
+// the phone's creation_time so prompts can say which footage is most recent.
+// t is seconds relative to the end of the last clip (flight t = 0).
+async function clipTimeline(jobs) {
+  const rows = [];
+  for (const { cam, src } of jobs) {
+    const { stderr } = await ffmpeg(['-i', src, '-f', 'null', '-t', '0', '-']);
+    const created = /creation_time\s*:\s*(\S+)/.exec(stderr)?.[1];
+    const dur = Number(/Duration: (\d+):(\d+):([\d.]+)/.exec(stderr)?.slice(1).reduce((a, x, i) => a + Number(x) * [3600, 60, 1][i], 0));
+    rows.push({ id: cam.id, start: created ? Date.parse(created) / 1000 : null, duration_s: dur });
+  }
+  if (rows.some((r) => r.start === null)) return { cameras: rows.map(({ id, duration_s }) => ({ id, duration_s })) };
+  const end = Math.max(...rows.map((r) => r.start + r.duration_s));
+  rows.sort((a, b) => a.start - b.start);
+  return {
+    cameras: rows.map((r) => ({ id: r.id, duration_s: r.duration_s,
+      start_t: +(r.start - end).toFixed(1), end_t: +(r.start + r.duration_s - end).toFixed(1) })),
+  };
 }
 
 // Paths for downstream stages.

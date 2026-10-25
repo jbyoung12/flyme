@@ -7,3 +7,4 @@ sites/*/*.mp4
 sites/*/frames/
 runs/
 .DS_Store
+videos/

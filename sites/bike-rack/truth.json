@@ -1,0 +1,7 @@
+{
+  "stride_m": 1.0,
+  "stand_point": "Location 1: facing along the Lyft bike rack, monument stairs to the left; paced 2026-10-25",
+  "first Lyft bike back wheel": {"forward": 3, "right": 3},
+  "monument staircase below the railing": {"forward": 14, "right": -5},
+  "landing spot by light pole, middle of trolley tracks": {"forward": 33, "right": 13}
+}

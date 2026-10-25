@@ -7,6 +7,7 @@ import { CAR } from '../shared/constants.js';
 import { SITE_JSON_SCHEMA } from '../shared/schema.js';
 import { uploadFile, streamInteraction, parseJson, loadPrompt, fill } from './gemini.js';
 import { mp4Path } from './ingest.js';
+import { readRun } from './runs.js';
 
 const YAW_NAMES = { 0: 'forward', 90: 'right', 180: 'back', 270: 'left' };
 
@@ -29,6 +30,14 @@ export function rigVars(rig, cams = rig.cameras) {
   };
 }
 
+function timelineText(siteId) {
+  const tl = readRun(siteId, 'clips.json');
+  if (!tl?.cameras?.[0]?.start_t && tl?.cameras?.[0]?.start_t !== 0) return 'Recording order unknown; treat clips as roughly simultaneous.';
+  return 'Recording order (t in seconds; t = 0 is the end of the most recent clip = "now"):\n' +
+    tl.cameras.map((c) => `- \`${c.id}\`: t = ${c.start_t} … ${c.end_t}`).join('\n') +
+    '\nThe scene is the same in every clip, but people and cars move between clips: the same person may appear in two clips at different places. Report each real object once.';
+}
+
 export function ingestedCameras(siteId, rig) {
   return rig.cameras.filter((c) => fs.existsSync(mp4Path(siteId, c.id)));
 }
@@ -44,12 +53,12 @@ export async function reconstruct({ siteId, rig }, sse) {
     input.push({ type: 'text', text: `Camera \`${c.id}\` (yaw ${c.yaw_deg}°, pitch ${c.pitch_deg}°):` });
     input.push({ type: 'video', uri: files[i].uri, mime_type: files[i].mimeType });
   });
-  input.push({ type: 'text', text: fill(loadPrompt('reconstruct.md'), { ...rigVars(rig, cams), site_id: siteId }) });
+  input.push({ type: 'text', text: fill(loadPrompt('reconstruct.md'), { ...rigVars(rig, cams), site_id: siteId, timeline: timelineText(siteId) }) });
 
   sse.status('Argon is reconstructing the street');
   const { text } = await streamInteraction({
     input,
-    generation_config: { thinking_level: 'high', max_output_tokens: 65536 },
+    generation_config: { thinking_level: process.env.FLYME_RECON_THINKING ?? 'medium', max_output_tokens: 65536 },
     response_format: { type: 'text', mime_type: 'application/json', schema: SITE_JSON_SCHEMA },
   }, { sse, siteId, label: 'reconstruct' });
 

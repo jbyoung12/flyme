@@ -85,6 +85,11 @@ export function validateSite(site) {
   return result(errors);
 }
 
+// Typical heights (m) when the model omits a cylinder's height.
+export const DEFAULT_CYLINDER_HEIGHT = {
+  person: 1.7, pole: 6, sign: 2.5, tree_trunk: 4, tree_canopy: 4, barrier: 1, building: 8, vehicle: 1.6, other: 2,
+};
+
 // Fill defaults so downstream code (sim, renderer) never branches on absence.
 export function normalizeObstacle(o) {
   const n = clone(o);
@@ -93,7 +98,9 @@ export function normalizeObstacle(o) {
   n.confidence ??= 0.5;
   if (n.shape !== 'wire') n.base_up ??= 0;
   if (n.shape === 'box') n.heading_deg ??= 0;
-  if (n.velocity === null) delete n.velocity;
+  if (n.shape === 'cylinder' && !(isNum(n.height) && n.height > 0)) n.height = DEFAULT_CYLINDER_HEIGHT[n.type] ?? 2;
+  // A zero velocity is a static object; dropping it keeps "moving" meaningful.
+  if (n.velocity === null || (isObj(n.velocity) && !n.velocity.forward && !n.velocity.right)) delete n.velocity;
   return n;
 }
 
@@ -271,7 +278,9 @@ const OBSTACLE_PROPS = {
 export const OBSTACLE_JSON_SCHEMA = {
   type: 'object',
   properties: OBSTACLE_PROPS,
-  required: ['id', 'type', 'label', 'shape', 'seen_in', 'confidence'],
+  // `height` is required because Argon drops it on cylinders otherwise; for
+  // boxes it repeats size.height, for wires it is 0 (validators ignore it).
+  required: ['id', 'type', 'label', 'shape', 'height', 'seen_in', 'confidence'],
 };
 
 export const SITE_JSON_SCHEMA = {

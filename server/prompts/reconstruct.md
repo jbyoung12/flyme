@@ -5,6 +5,8 @@ The videos above are ~5 s clips from the car's cameras, all taken from the same 
 
 {{camera_table}}
 
+{{timeline}}
+
 ## Coordinate frame (car-centric, metres)
 - Origin = the point on the ground directly under the cameras (center of our car's footprint). Our own car is a {{car_l}} m × {{car_w}} m box around the origin, facing **forward** — never list it.
 - `forward` = metres ahead of the car (negative = behind), `right` = metres to the car's right (negative = left), `up` = metres above ground.
@@ -24,6 +26,7 @@ Every object within ~40 m that matters for a vertical hop of 10–40 m:
 - `pole`, `sign` (sign plate as a box with `base_up` = bottom edge, or the post as a cylinder), `tree_trunk` (cylinder) + `tree_canopy` (cylinder with `base_up` = lowest branches, `radius` = canopy radius, `height` = canopy depth), `building` / `barrier` (boxes), `other`.
 - `wire` (overhead lines, cables, string lights): `shape: "wire"` with `from` / `to` endpoints including `up` heights; extend it to where it leaves the frame. The `up` clip (if present) looks ~60° upward and is the main source for wires and canopies.
 - `person`: `shape: "cylinder"`, radius 0.3, height ≈ 1.7.
+- Every obstacle has a top-level `height`: a cylinder's real height (a street light is 6–9 m, a monument column can be 25 m+), a box's `size.height`, or 0 for a wire. Every `cylinder` also needs `radius`; every `box` needs `size` and `heading_deg`. Omit `velocity` for static objects.
 - **Moving objects** (people walking, cars driving or pulling out): `center` = position at the **last frame of the clip** it was seen in; `velocity` {forward, right} in m/s estimated from its displacement across the clip (walking ≈ 1.2–1.5 m/s); `intent_notes` for anything the physics can't know ("reverse lights on", "heading toward the crosswalk", "looking at phone, drifting toward the road"). Static objects omit `velocity`.
 - `surfaces`: polygons (≥ 4 points, in forward/right) for the road, sidewalks, parking lane, grass, plaza.
 - `confidence` 0–1 per obstacle; `seen_in` = camera ids. Ids `o1`, `o2`, … in order of distance from the origin; surfaces `s1`, `s2`, ….
