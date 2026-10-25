@@ -481,9 +481,9 @@ export function createScene(container, { onTap } = {}) {
     let best = sim.samples[0];
     for (const s of sim.samples) if (Math.abs(s.t - c.t) < Math.abs(best.t - c.t)) best = s;
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.28, 20, 14), new THREE.MeshBasicMaterial({ color: COLORS.unsafe })));
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 14), new THREE.MeshBasicMaterial({ color: COLORS.unsafe })));
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: COLORS.unsafe, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-    glow.scale.setScalar(2.2);
+    glow.scale.setScalar(1.1);
     g.add(glow);
     g.position.copy(toThree(best, best.up + CAR.height / 2));
     g.userData.obstacleId = c.obstacle_id;
@@ -528,7 +528,25 @@ export function createScene(container, { onTap } = {}) {
     a.tube = new THREE.Group();
     a.tube.add(core, glow);
     a.tubeGlow = glow;
+    a.tubeSegs = segs;
+    let acc = 0;
+    a.tubeCum = a.pts.map((p, i) => (acc += i ? p.distanceTo(a.pts[i - 1]) : 0));
     arcGroup.add(a.tube);
+  }
+
+  // While the car flies, draw only the path ahead of its nose: the flown part
+  // trails between the chase camera and the car and would cover it. null = full path.
+  function trimTube(pos) {
+    const a = arcs.get(view.chosenKey);
+    if (!a?.tube) return;
+    let seg = 0;
+    if (pos) {
+      let k = 0, best = Infinity;
+      a.pts.forEach((p, i) => { const d = p.distanceToSquared(pos); if (d < best) { best = d; k = i; } });
+      const total = a.tubeCum[a.tubeCum.length - 1] || 1;
+      seg = Math.min(a.tubeSegs, Math.ceil(((a.tubeCum[k] + CAR.length / 2) / total) * a.tubeSegs));
+    }
+    for (const [mesh, radial] of [[a.tube.children[0], 10], [a.tubeGlow, 14]]) mesh.geometry.setDrawRange(seg * radial * 6, Infinity);
   }
 
   function styleArcs() {
@@ -599,6 +617,7 @@ export function createScene(container, { onTap } = {}) {
 
   function resetCar() {
     play = null;
+    trimTube(null);
     car.rotation.set(0, 0, 0);
     placeCar({ forward: 0, right: 0, up: 0 });
     setObstacleTime(0);
@@ -624,6 +643,7 @@ export function createScene(container, { onTap } = {}) {
     const flying = p.t < p.end;
     const level = flying ? (s.thrust_kN ?? 20) / (CAR.maxThrustN / 1000) : 0;
     placeCar(s, level);
+    trimTube(car.position);
     // Small visual pitch from forward acceleration (sim ignores tilt).
     const ahead = sampleAt(p.sim.samples, Math.min(p.t + 0.1, p.end));
     const vF = (ahead.forward - s.forward) / 0.1;
@@ -655,6 +675,7 @@ export function createScene(container, { onTap } = {}) {
         if (p.chase) setPlanView({ hop: false });
         if (p.chase && viewName !== 'pov') controls.target.copy(car.position).add(new THREE.Vector3(0, 0.6, 0));
         if (!p.keep) {
+          trimTube(null);
           car.rotation.set(0, 0, 0); placeCar({ forward: 0, right: 0, up: 0 }); setObstacleTime(0);
           if (p.chase && viewName === 'pov') setView('pov');
         }
@@ -834,7 +855,10 @@ export function createScene(container, { onTap } = {}) {
     // Hide any obstacle the camera is inside (e.g. a tree canopy behind the car).
     for (const c of siteGroup.children) {
       if (!c.userData.box) continue;
-      const shown = !c.userData.lookHidden || highlightIds.has(c.userData.obstacle?.id);
+      // Over real footage the real people are visible, and our marker sits where they will be
+      // at takeoff (mid-clip photo ≠ now), so never pop a person's pill back in; label only.
+      const ob = c.userData.obstacle;
+      const shown = !c.userData.lookHidden || (highlightIds.has(ob?.id) && ob?.type !== 'person');
       c.visible = shown && !c.userData.box.containsPoint(camera.position);
     }
     renderer.render(scene, camera);
