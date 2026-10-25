@@ -105,7 +105,7 @@ async function judge({ siteId, site, target, rig = DEFAULT_RIG, cards, round, mu
     round,
     must_pick: mustPick ? 'This is the final round: you MUST pick one of these candidates (decision "pick"), or explain in `why` why none is acceptable and set chosen_id to "none".' : 'You may pick now, or ask for revised routes (decision "revise") if every candidate has a street-context problem the simulator cannot see.',
   }) });
-  sse.status(`Argon is judging ${cards.length} safe routes against the footage (round ${round})`);
+  sse.status(`Argon is choosing among the ${cards.length} safe flight paths…`);
   const { text } = await streamInteraction({
     input,
     generation_config: { thinking_level: 'medium' },
@@ -133,7 +133,7 @@ async function suggestNearby(site, target, sse) {
     .slice(0, 8)
     .map(({ forward, right }) => ({ forward, right }));
   if (!cells.length) return null;
-  sse.status(`no safe route to the exact spot — checking ${cells.length} spots within 4.5 m`);
+  sse.status('No safe path to that exact spot — checking nearby spots…');
   checkOpen(sse);
   const res = await reachCells(site, cells, PROBE_SHAPES);
   const ok = res.filter((r) => r.safe)
@@ -155,7 +155,7 @@ export function siteAfter(site, wait) {
 // People/cars are what block the hop → find the shortest departure delay
 // (3–20 s) after which some route is SAFE.
 async function suggestWait(site, target, sse) {
-  sse.status('people are in the way — checking whether waiting a few seconds clears the route');
+  sse.status('People are in the way — checking whether waiting a few seconds helps…');
   for (const wait of [3, 6, 10, 15, 20]) {
     checkOpen(sse);
     const res = await simulateMany(siteAfter(site, wait), PROBE_SHAPES.map((sh) => ({ target, ...sh })));
@@ -176,17 +176,17 @@ function roundCandidate(id, label, e) {
 
 export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_RIG, wait_s: waitS = 0, judgeWith = 'agent' }, sse) {
   const site = siteAfter(siteNow, waitS);
-  if (waitS) sse.log(`planning for departure in ${waitS} s: moving people and cars advanced by their velocity`);
-  sse.status('simulator: searching 800 flight paths to the landing spot');
+  if (waitS) sse.log(`Planning for take-off in ${waitS} s, with walking people and moving cars moved ahead`);
+  sse.status('Simulator is trying 800 flight paths to your landing spot…');
   const t0 = Date.now();
   const found = await searchRoutesParallel(site, target);
-  sse.log(`simulator: ${found.safe.length} of ${found.tried} route shapes are SAFE (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+  sse.log(`Simulator: ${found.safe.length} of ${found.tried} flight paths are safe`);
   checkOpen(sse);
   if (found.safe.length) {
     const before = Math.max(...found.safe.map((e) => e.margins.min_clearance_m));
     found.safe = await refineSafe(site, found.safe);
     const after = Math.max(...found.safe.map((e) => e.margins.min_clearance_m));
-    sse.log(`simulator: refined to ${found.safe.length} SAFE routes · best clearance ${before.toFixed(2)} → ${after.toFixed(2)} m`);
+    sse.log(`Simulator fine-tuned the safe paths: best clearance ${before.toFixed(2)} m → ${after.toFixed(2)} m`);
   }
 
   if (!found.safe.length) {
@@ -201,11 +201,15 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
     // Name everyone inside the keep-out on the best attempt, not just the closest.
     const prepared = prepareObstacles(site);
     const best = show[0].sim;
+    // Name only people the flight actually breaks the keep-out for: anyone
+    // already near the car at takeoff is fine unless the flight gets closer.
     const tooClose = site.obstacles.map((o, i) => {
-      if (o.type !== 'person') return null;
+      if (o.type !== 'person' || !best.samples.length) return null;
+      const d0 = carToObstacleClearance3D(best.samples[0], prepared[i], 0);
       let d = Infinity;
       for (const smp of best.samples) d = Math.min(d, carToObstacleClearance3D(smp, prepared[i], smp.t));
-      return d < 5 ? `${o.id} ${o.label} (${Math.max(d, 0).toFixed(1)} m)` : null;
+      const fails = d < 5 && !(d0 < 5 && d >= d0 - 0.1);
+      return fails ? `${o.id} ${o.label} (${Math.max(d, 0).toFixed(1)} m)` : null;
     }).filter(Boolean);
     const other = [...new Set(show.flatMap((e) => e.sim.checks.filter((c) => !c.pass && c.id !== 'pedestrian').map((c) => c.message)))].slice(0, 2);
     const reasons = [...(tooClose.length ? [`within the 5 m thruster keep-out of ${tooClose.join(', ')}`] : []), ...other];
@@ -265,7 +269,8 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
       decision = { chosen_id: chosenId, why: d.why, semantic_notes: d.semantic_notes ?? [] };
     } catch (err) {
       if (sse.closed) throw err;
-      sse.log(`Managed Agent judge failed (${err.message}); falling back to a direct Argon judge`);
+      console.warn('agent judge failed:', err.message);
+      sse.log("The Managed Agent didn't answer in time — Argon is choosing instead");
       rounds.length = 0;
     }
   }
@@ -285,7 +290,7 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
         return roundCandidate(id, label, e);
       });
       const safe2 = cands2.filter((c) => c.sim_verdict === 'SAFE');
-      sse.log(`simulator: ${safe2.length} of ${cands2.length} round-2 routes are SAFE`);
+      sse.log(`Simulator: ${safe2.length} of ${cands2.length} new paths are safe`);
       decision = await judge({ siteId, site, target, rig, cards: safe2.length ? safeCards(cands2) : safeCards(cands1), round: 2, mustPick: true }, sse);
       rounds.push({ n: 2, candidates: cands2, decision: 'pick', chosen_id: decision.chosen_id, why: decision.why, revision_notes: null });
     }
@@ -306,6 +311,6 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
     search: { tried: found.tried, safe: found.safe.length },
   };
   const v = validateAgentResult(out);
-  if (!v.ok) sse.log(`Warning: search result validation: ${v.errors.join('; ')}`);
+  if (!v.ok) console.warn('search result validation:', v.errors.join('; '));
   return out;
 }

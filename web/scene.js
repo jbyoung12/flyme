@@ -12,6 +12,7 @@ import { obstacleObject, surfaceObjects, toThree, disposeTree } from './site-mes
 import { buildFlyingCar, glowTexture } from './car-model.js';
 import { esc, fmt, shortReason } from './format.js';
 import { createFootageProjection, PAVEMENT } from './footage-projection.js';
+import { PAINT_EXTENT, FIXED_TYPES, spriteSpan, renderTopDown } from './paint.js';
 
 const BG = '#0b0c0e';
 const COLORS = { unsafe: '#ff4d4f', safe: '#2fd27a', chosen: '#3d8bff', amber: '#ffb020' };
@@ -72,6 +73,7 @@ export function createScene(container, { onTap } = {}) {
     controls.minPolarAngle = pov ? Math.PI * 0.433 : 0;
     controls.maxPolarAngle = pov ? Math.PI * 0.55 : Math.PI * 0.49;
     photo.setPov(pov);
+    applyLook();
   }
 
   scene.add(new THREE.HemisphereLight('#c9d6ff', '#0b0c0e', 0.9));
@@ -96,21 +98,131 @@ export function createScene(container, { onTap } = {}) {
   let photoLook = 'model';
   const groundCol = new THREE.Color('#0d0f12');
   function setPhoto(on, { look = 'photo' } = {}) {
-    photo.setVisible(on && !world);
+    photoLook = on ? look : 'model';
+    applyLook();
+  }
+  function applyLook() {
+    const on = photoLook !== 'model';
+    const isBlend = photoLook === 'blend';
+    // AI world (outside views only): painted ground + standing cutouts.
+    const painted = on && !isBlend && paintOn && Boolean(paint) && viewName !== 'pov' && !world;
+    // Without a painted ground, the projected footage ground stays (no backdrop).
+    photo.setVisible(on && !world && (!painted || !paint.ground));
+    photo.backdrop.visible = !painted;
+    paintGroup.visible = painted;
     // The picture already shows every real object: hide our boxes, people's
-    // keep-out rings and motion arrows. Only an obstacle a flight path fails
-    // on is drawn (red) on top.
-    for (const c of siteGroup?.children ?? []) c.userData.lookHidden = on && Boolean(c.userData.obstacle);
-    siteGroup?.traverse((o) => { if (o.userData.surface) o.visible = !on; });
-    for (const e of obstacles) for (const x of [e.ring, e.arrow, e.path]) if (x) x.visible = !on;
-    ground.material.color.copy(on ? new THREE.Color(PAVEMENT) : groundCol);
+    // keep-out rings and motion arrows (unless in 'blend' mode).
+    for (const c of siteGroup?.children ?? []) c.userData.lookHidden = on && !isBlend && Boolean(c.userData.obstacle) && (!painted || paint.sprites.has(c.userData.obstacle.id));
+    siteGroup?.traverse((o) => {
+      if (o.userData.surface) o.visible = !on;
+      const m = o.material;
+      if (m && o.isMesh && !o.userData.surface && o.parent?.userData?.obstacle) {
+        m.userData.baseOpacity ??= m.opacity ?? 1;
+        m.transparent = isBlend || m.userData.baseOpacity < 1;
+        m.opacity = isBlend ? Math.min(0.6, m.userData.baseOpacity) : m.userData.baseOpacity;
+      }
+    });
+    for (const e of obstacles) for (const x of [e.ring, e.arrow, e.path]) if (x) x.visible = !on || isBlend;
+    ground.material.color.copy(on ? (painted && paint.ground ? paint.ground.color : new THREE.Color(PAVEMENT)) : groundCol);
     // The backdrop doesn't write depth, so the 600 m ground plane and grid
     // beyond it would paint a grey band (and lines) across the horizon.
-    ground.visible = grid.visible = !on;
-    photoLook = on ? look : 'model';
-    scene.fog.near = on ? 120 : 55;
-    scene.fog.far = on ? 400 : 150;
+    ground.visible = !on || painted;
+    grid.visible = !on;
+    scene.fog.near = on ? (painted ? 60 : 120) : 55;
+    scene.fog.far = on ? (painted ? 220 : 400) : 150;
     if (siteGroup) styleLabels();
+  }
+
+  // ---------------------------------------------------------------- AI world
+  // server/paint.js output: a painted top-down ground and one keyed-out
+  // cutout per obstacle, stood up at the reconstructed position. Only used
+  // away from the rig point, where projected footage smears.
+  const paintGroup = new THREE.Group();
+  paintGroup.visible = false;
+  scene.add(paintGroup);
+  let paint = null; // {ground: {mesh, color}|null, sprites: Map(id → {mesh, fixed})}
+  let paintOn = true;
+  const fadeTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, '#fff'); g.addColorStop(0.8, '#fff'); g.addColorStop(1, '#000');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+    return new THREE.CanvasTexture(c);
+  })();
+  function clearPaint() {
+    for (const c of [...paintGroup.children]) { paintGroup.remove(c); disposeTree(c); }
+    paint = null;
+  }
+  // ground: {texture, color}|null; sprites: [{id, texture, aspect}]
+  function setPaint(next) {
+    clearPaint();
+    if (next && (next.ground || next.sprites?.length)) {
+      paint = { ground: null, sprites: new Map() };
+      if (next.ground) {
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(2 * PAINT_EXTENT, 2 * PAINT_EXTENT).rotateX(-Math.PI / 2),
+          new THREE.MeshBasicMaterial({ map: next.ground.texture, alphaMap: fadeTex, transparent: true, toneMapped: false, depthWrite: false }),
+        );
+        mesh.position.y = 0.008;
+        mesh.renderOrder = -2;
+        paintGroup.add(mesh);
+        paint.ground = { mesh, color: next.ground.color };
+      }
+      for (const s of next.sprites ?? []) {
+        const o = site?.obstacles?.find((x) => x.id === s.id);
+        if (!o) continue;
+        const { bottom, top } = spriteSpan(o);
+        const h = top - bottom;
+        const dim = o.shape === 'box' ? Math.max(o.size.length, o.size.width) : 2 * o.radius;
+        const w = THREE.MathUtils.clamp(h * s.aspect, 0.4 * dim, 1.4 * dim + 0.3);
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(w, h).translate(0, h / 2, 0),
+          new THREE.MeshBasicMaterial({ map: s.texture, alphaTest: 0.5, side: THREE.DoubleSide, toneMapped: false }),
+        );
+        mesh.userData.entry = obstacles.find((e) => e.o.id === s.id);
+        mesh.userData.bottom = bottom - (o.base_up ?? 0);
+        mesh.userData.fixed = FIXED_TYPES.has(o.type);
+        paintGroup.add(mesh);
+        paint.sprites.set(s.id, mesh);
+      }
+    }
+    applyLook();
+  }
+  function stepPaint() {
+    if (!paintGroup.visible || !paint) return;
+    for (const mesh of paint.sprites.values()) {
+      const e = mesh.userData.entry;
+      if (!e) continue;
+      mesh.position.copy(e.obj.position);
+      mesh.position.y += mesh.userData.bottom;
+      // Turn about the vertical to face the viewer (or the rig, for big ones).
+      const look = mesh.userData.fixed ? new THREE.Vector3(0, 0, 0) : camera.position;
+      mesh.rotation.y = Math.atan2(look.x - mesh.position.x, look.z - mesh.position.z);
+    }
+  }
+  // Inputs for the ground repaint: the projected footage seen from straight
+  // above (occlusion-dimmed, so smears read as grey) and a flat layout map.
+  function capturePaintGuides() {
+    if (!site || photoLook === 'model') return null;
+    const pov = viewName === 'pov';
+    photo.setPov(false);
+    const top = new THREE.Scene();
+    const parent = photo.ground.parent;
+    top.add(photo.ground);
+    const photoUrl = renderTopDown(renderer, top);
+    parent.add(photo.ground);
+    photo.setPov(pov);
+    const layout = new THREE.Scene();
+    layout.background = new THREE.Color('#55565a');
+    layout.add(new THREE.AmbientLight('#ffffff', 2.5));
+    for (const s of surfaceObjects(site, 'critique')) layout.add(s);
+    for (const o of site.obstacles ?? []) { try { layout.add(obstacleObject(o, 'critique')); } catch { /* skip */ } }
+    const layoutUrl = renderTopDown(renderer, layout);
+    disposeTree(layout);
+    return { photo: photoUrl, layout: layoutUrl };
   }
 
   const lineMats = new Set();
@@ -212,6 +324,7 @@ export function createScene(container, { onTap } = {}) {
 
   function setSite(next, { flash = [] } = {}) {
     photo.setOcclusion(next);
+    clearPaint();
     clearSite();
     site = next;
     if (!site) return;
@@ -337,7 +450,7 @@ export function createScene(container, { onTap } = {}) {
     if (!ok.length) return;
     const size = map.step_m * 0.9;
     const geo = new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: '#2fd27a', transparent: true, opacity: 0.09, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: '#2fd27a', transparent: true, opacity: 0.28, depthWrite: false });
     zoneMesh = new THREE.InstancedMesh(geo, mat, ok.length);
     const m = new THREE.Matrix4();
     ok.forEach((c, i) => { m.makeTranslation(c.right, 0.02, -c.forward); zoneMesh.setMatrixAt(i, m); });
@@ -708,6 +821,7 @@ export function createScene(container, { onTap } = {}) {
       if (camTween.k >= 1) camTween.active = false;
     }
     stepPlay(dt);
+    stepPaint();
     stepParticles(dt);
     car.userData.step?.(dt);
     updateObstacleFx(dt, time);
@@ -731,12 +845,13 @@ export function createScene(container, { onTap } = {}) {
   applyViewMode();
 
   return {
-    setFootage: photo.setFootage, setPhoto, captureGuide, setWorldImage, get world() { return Boolean(world); }, get photo() { return photo.visible; },
+    setFootage: photo.setFootage, setPhoto, captureGuide, setPaint, capturePaintGuides,
+    setPaintEnabled(on) { paintOn = on; applyLook(); }, get painted() { return Boolean(paint); }, setWorldImage, get world() { return Boolean(world); }, get photo() { return photo.visible; },
     setSite, setTarget, setZones, addCandidate, updateCandidate, setPlanView, clearPlan,
     playRoute, resetCar, setView, highlight, recordHop, setObstacleTime,
     setCarVariant(v) {
+      // Stay in POV: other poses warp the projected footage.
       car.userData.setVariant(v);
-      if (viewName === 'pov') setView('overview');
     },
     get carVariant() { return car.userData.variant; },
     get playing() { return Boolean(play); },

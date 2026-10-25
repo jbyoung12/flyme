@@ -34,7 +34,7 @@ export async function critique({ siteId, round, renders = {}, site, rig }, sse) 
     ...rigVars(rig, cams), round, max_rounds: MAX_CRITIQUE_ROUNDS, pass_score: CRITIQUE_PASS_SCORE,
   }) });
 
-  sse.status(`Argon is comparing ${cams.length} renders with the footage (round ${round})`);
+  sse.status(`Argon is checking the 3D street against each camera (check ${round} of up to 3)…`);
   const { text } = await streamInteraction({
     input,
     generation_config: { thinking_level: 'medium' },
@@ -45,7 +45,7 @@ export async function critique({ siteId, round, renders = {}, site, rig }, sse) 
   // Drop empty ids on adds so applyPatch assigns the next o<N>.
   for (const op of c.patch ?? []) if (op.op === 'add' && op.obstacle && !op.obstacle.id) delete op.obstacle.id;
   anchorPatch(c.patch ?? [], site, rig, readRun(siteId, 'clips.json'), sse);
-  for (const cam of c.cameras ?? []) sse.log(`${cam.id}: ${cam.match_score}/100${cam.issues?.length ? ` — ${cam.issues.join('; ')}` : ''}`);
+  for (const cam of c.cameras ?? []) sse.log(`${cam.id[0].toUpperCase()}${cam.id.slice(1)} camera matches ${cam.match_score}%${cam.issues?.length ? ` — ${cam.issues.join('; ')}` : ''}`);
   return c;
 }
 
@@ -67,5 +67,5 @@ function anchorPatch(patch, site, rig, clips, sse) {
       if (o.center_source === 'anchor') { op.set = { ...op.set, center: o.center, center_source: 'anchor' }; n++; }
     }
   }
-  if (n) sse.log(`ground-anchored ${n} patch ops`);
+  if (n) sse.log(`Measured ${n} corrected positions from the photos`);
 }

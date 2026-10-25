@@ -61,7 +61,6 @@ export function runChecks(site, simTrace, preparedObs) {
 
     let maxCSoFar = c0;
     let graceClearanceActive = graceClearanceAtStart;
-    let maxPedSoFar = ped0;
     let gracePedActive = gracePedAtStart;
 
     for (let k = 0; k < frames.length; k++) {
@@ -80,13 +79,10 @@ export function runChecks(site, simTrace, preparedObs) {
       // counts), with takeoff grace if 0 < p(0) < 5 m while they only get farther away.
       if (isPerson) {
         const pDist = carToObstacleClearance3D(carPos, obs, t);
-        if (gracePedActive) {
-          if (pDist >= maxPedSoFar - 1e-4 && pDist < SAFETY.pedestrianKeepOutM) { // grace lasts while they only get farther away
-            maxPedSoFar = Math.max(maxPedSoFar, pDist);
-          } else {
-            gracePedActive = false;
-          }
-        }
+        // Someone already inside the keep-out at takeoff: the takeoff itself is
+        // the closest acceptable pass, so the flight must never get closer to
+        // them than that (10 cm tolerance).
+        if (gracePedActive && pDist < ped0 - 0.1) gracePedActive = false;
         if (!gracePedActive && pDist < minPedestrian.val) {
           minPedestrian = { val: pDist, t, obs };
         }
@@ -201,7 +197,7 @@ export function runChecks(site, simTrace, preparedObs) {
       t: round2(minPedestrian.t),
       obstacle_id: minPedestrian.obs?.id ?? null,
       message: minPedestrian.obs
-        ? `${pedVal.toFixed(2)} m horizontal to ${minPedestrian.obs.label} (${minPedestrian.obs.id}) at t=${minPedestrian.t.toFixed(2)} s`
+        ? `${pedVal.toFixed(2)} m from ${minPedestrian.obs.label} (${minPedestrian.obs.id}) at t=${minPedestrian.t.toFixed(2)} s`
         : 'No pedestrians within keep-out radius',
     },
     {

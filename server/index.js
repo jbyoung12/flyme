@@ -141,6 +141,13 @@ app.post('/api/sites/:id/worldview', async (req, res) => {
   if (worldview) res.json(await worldview({ siteId: req.params.id, rig: readRig(req.params.id), guide: req.body?.guide, force: Boolean(req.body?.force) }));
 });
 
+// AI world (visual only): clean ground + object cutouts for outside views,
+// built from crops/renders the browser sends; cached by input hash.
+app.post('/api/sites/:id/paint', async (req, res) => {
+  const paint = await need(res, 'paint', 'paint');
+  if (paint) res.json(await paint({ siteId: req.params.id, rig: readRig(req.params.id), ground: req.body?.ground, sprites: req.body?.sprites }));
+});
+
 // ---------------------------------------------------------------- A. ingest
 
 app.post('/api/sites/:id/ingest', async (req, res) => {

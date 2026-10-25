@@ -34,7 +34,7 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
   }
   input.push({ type: 'text', text: fill(loadPrompt('plan-search-agent.md'), { target: JSON.stringify(target) }) });
 
-  sse.status('Managed Agent: starting sandbox with our simulator');
+  sse.status("Starting the Managed Agent's cloud computer with our simulator…");
   const t0 = Date.now();
   let ix = await client().interactions.create({
     agent: AGENT_NAME,
@@ -45,7 +45,7 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
   }, { timeout: 120_000 });
   const envId = ix.environment_id;
   if (siteId && ix.id) recordInteraction(siteId, 'plan-search-agent', ix.id);
-  sse.status('Managed Agent: judging the safe routes against the footage');
+  sse.status('Managed Agent is looking at the camera photos and the safe flight paths…');
 
   let captured = null, thought = '';
   const flush = () => { if (thought.trim()) sse.send('thought', { text: thought.trim() }); thought = ''; };
@@ -59,7 +59,7 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
       try { batch = JSON.parse(out.slice(j, out.lastIndexOf('}') + 1)); } catch { /* not a sim batch */ }
       if (batch?.schema === 'flyme.sim-batch/1') {
         const list = batch.candidates ?? [];
-        sse.send('sim_result', { summary: `agent ran our simulator: ${batch.safe_count ?? list.filter((c) => c.verdict === 'SAFE').length} of ${list.length} of its routes SAFE` });
+        sse.send('sim_result', { summary: `Managed Agent tested ${list.length} of its own flight paths in our simulator: ${batch.safe_count ?? list.filter((c) => c.verdict === 'SAFE').length} safe` });
       }
     } else if (st.type === 'function_call') {
       const file = st.arguments?.TargetFile ?? st.arguments?.path ?? '';
@@ -82,7 +82,7 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
       try { await client().interactions.cancel(ix.id); } catch { /* ignore */ }
       throw new Error(`Managed Agent judge ${err.message}`);
     }
-    sse.log(`agent stream dropped (${err.message}); polling`);
+    sse.log('Connection to the Managed Agent dropped; waiting for its answer…');
   }
   flush();
   ix = await client().interactions.get(ix.id);
@@ -91,7 +91,7 @@ export async function agentJudge({ siteId, site, target, rig, cards }, sse) {
     await sleep(1500);
     ix = await client().interactions.get(ix.id);
   }
-  sse.log(`Managed Agent ${ix.status} in ${((Date.now() - t0) / 1000).toFixed(0)} s`, { interaction_id: ix.id, environment_id: envId });
+  sse.log(`Managed Agent finished in ${((Date.now() - t0) / 1000).toFixed(0)} s`, { interaction_id: ix.id, environment_id: envId, status: ix.status });
   const decision = (await download(envId, 'workspace/out/decision.json')) ?? (captured ? parseJson(captured, 'decision.json') : null) ?? (ix.output_text ? parseJson(ix.output_text, 'agent output') : null);
   if (!decision?.chosen_id) throw new Error('Managed Agent wrote no decision.json');
   return decision;

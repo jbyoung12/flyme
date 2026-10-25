@@ -48,7 +48,7 @@ export function ingestedCameras(siteId, rig) {
 export async function reconstruct({ siteId, rig }, sse) {
   const cams = ingestedCameras(siteId, rig);
   if (!cams.length) throw new Error(`no ingested clips for ${siteId}; run ingest first`);
-  sse.status(`uploading ${cams.length} clips`);
+  sse.status(`Uploading the ${cams.length} camera clips…`);
   const files = await Promise.all(cams.map((c) => uploadFile(siteId, `${c.id}.mp4`, mp4Path(siteId, c.id), 'video/mp4', sse)));
 
   const input = [];
@@ -62,7 +62,7 @@ export async function reconstruct({ siteId, rig }, sse) {
   });
   input.push({ type: 'text', text: fill(loadPrompt('reconstruct.md'), { ...rigVars(rig, cams), site_id: siteId, timeline: timelineText(cams) }) });
 
-  sse.status('Argon is reconstructing the street');
+  sse.status(`Argon is watching the ${cams.length} clips and rebuilding the street in 3D…`);
   const { text } = await streamInteraction({
     input,
     generation_config: { thinking_level: process.env.FLYME_RECON_THINKING ?? 'medium', max_output_tokens: 65536 },
@@ -70,8 +70,8 @@ export async function reconstruct({ siteId, rig }, sse) {
   }, { sse, siteId, label: 'reconstruct' });
 
   const raw = parseJson(text, 'reconstruct');
-  sse.log(`reconstructed ${raw.obstacles?.length ?? 0} obstacles, ${raw.surfaces?.length ?? 0} surfaces`);
+  sse.log(`Argon found ${raw.obstacles?.length ?? 0} objects around the car`);
   const { site, moved } = applyAnchors(normalizeSite(raw), rig, readRun(siteId, 'clips.json'));
-  sse.log(`ground-anchored ${moved.length} static obstacles`, { moved });
+  sse.log(`Measured the exact position of ${moved.length} objects from where they touch the ground`, { moved });
   return site;
 }

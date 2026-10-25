@@ -30,7 +30,7 @@ export async function uploadFile(siteId, key, filePath, mimeType, sse) {
       if (f.state === 'ACTIVE') return { name: f.name, uri: f.uri, mimeType: f.mimeType };
     } catch { /* expired or deleted → re-upload */ }
   }
-  sse?.status(`uploading ${key}`);
+  sse?.status(`Uploading the ${key.replace(/\.mp4$/, '')} camera clip…`);
   let f = await client().files.upload({ file: filePath, config: { mimeType } });
   while (f.state === 'PROCESSING') {
     await sleep(2000);
@@ -52,6 +52,16 @@ export function recordInteraction(siteId, label, id) {
 // Stream one interaction. Thought summaries → `thought` events; output text is
 // accumulated (it's JSON when response_format is set, so it isn't logged
 // token by token; a `status` with the char count is sent every ~2 s instead).
+// Plain-English description of what a labelled call is doing (shown in the UI).
+export function humanTask(label = '') {
+  const round = /\.r(\d+)$/.exec(label)?.[1];
+  if (label.startsWith('reconstruct')) return 'Argon is writing down the 3D street';
+  if (label.startsWith('critique')) return `Argon is writing its corrections${round ? ` (check ${round})` : ''}`;
+  if (label.startsWith('plan-search')) return 'Argon is choosing a flight path';
+  if (label.startsWith('plan-local')) return 'Argon is proposing flight paths';
+  return 'Argon is answering';
+}
+
 export async function streamInteraction(params, { sse, siteId, label, timeoutMs = 15 * 60_000 } = {}) {
   const t0 = Date.now();
   const stream = await client().interactions.create(
@@ -78,9 +88,9 @@ export async function streamInteraction(params, { sse, siteId, label, timeoutMs 
         } else if (ev.delta?.type === 'text') {
           flushThought();
           text += ev.delta.text ?? '';
-          if (Date.now() - lastTick > 2000) {
+          if (!lastTick) {
             lastTick = Date.now();
-            sse?.status(`${label}: writing (${text.length} chars)`);
+            sse?.status(`${humanTask(label)}…`);
           }
         }
         break;
@@ -104,7 +114,7 @@ export async function streamInteraction(params, { sse, siteId, label, timeoutMs 
     // A dropped stream ("terminated", socket reset) doesn't cancel the stored
     // interaction: poll it to completion instead of failing the stage.
     if (!id || /\b(4\d\d)\b/.test(String(err.status ?? ''))) throw err;
-    sse?.log(`${label}: stream dropped (${err.message}); recovering stored result`);
+    sse?.log('Connection to Argon dropped; fetching its finished answer instead');
     let ix = await client().interactions.get(id);
     while (['in_progress', 'queued'].includes(ix.status)) {
       await sleep(2000);
@@ -124,7 +134,7 @@ export async function streamInteraction(params, { sse, siteId, label, timeoutMs 
     status = ix.status ?? status;
   }
   const ms = Date.now() - t0;
-  sse?.log(`${label}: ${status ?? 'done'} in ${(ms / 1000).toFixed(1)} s`, { usage, interaction_id: id });
+  sse?.log(`Argon answered in ${(ms / 1000).toFixed(0)} s`, { usage, interaction_id: id, task: label });
   return { id, text, usage, status, ms };
 }
 
