@@ -5,8 +5,10 @@
   "type": "module",
   "description": "Flying-car hop planner: Gemini 4 Argon reconstructs the site from the car's cameras, plans a thruster hop, and verifies it in a render/simulate/critique loop.",
   "scripts": {
-    "dev": "node server/index.js",
-    "test": "node --test shared/"
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "test": "node --test shared/",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.31.0",

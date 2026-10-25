@@ -1,0 +1,38 @@
+{
+  "schema": "flyme.site/1",
+  "id": "demo-street",
+  "name": "Demo street (hand-made fixture)",
+  "round": 0,
+  "surfaces": [
+    { "id": "s1", "type": "road", "polygon": [{"forward": -20, "right": -3}, {"forward": 50, "right": -3}, {"forward": 50, "right": 7}, {"forward": -20, "right": 7}] },
+    { "id": "s2", "type": "sidewalk", "polygon": [{"forward": -20, "right": -9}, {"forward": 50, "right": -9}, {"forward": 50, "right": -3}, {"forward": -20, "right": -3}] }
+  ],
+  "obstacles": [
+    { "id": "o1", "type": "vehicle", "label": "parked white SUV", "shape": "box",
+      "center": {"forward": 9, "right": 0}, "base_up": 0,
+      "size": {"length": 4.7, "width": 1.9, "height": 1.75}, "heading_deg": 0,
+      "seen_in": ["front"], "confidence": 0.85 },
+    { "id": "o2", "type": "vehicle", "label": "parked gray sedan", "shape": "box",
+      "center": {"forward": -7.5, "right": 0}, "base_up": 0,
+      "size": {"length": 4.6, "width": 1.8, "height": 1.45}, "heading_deg": 0,
+      "seen_in": ["back"], "confidence": 0.8 },
+    { "id": "o3", "type": "pole", "label": "street light", "shape": "cylinder",
+      "center": {"forward": 14, "right": -3.6}, "base_up": 0, "radius": 0.15, "height": 7,
+      "seen_in": ["front", "left"], "confidence": 0.75 },
+    { "id": "o4", "type": "tree_trunk", "label": "sidewalk tree trunk", "shape": "cylinder",
+      "center": {"forward": 31, "right": -5}, "base_up": 0, "radius": 0.25, "height": 3,
+      "seen_in": ["front"], "confidence": 0.6 },
+    { "id": "o5", "type": "tree_canopy", "label": "sidewalk tree canopy", "shape": "cylinder",
+      "center": {"forward": 31, "right": -5}, "base_up": 3, "radius": 2.5, "height": 4,
+      "seen_in": ["front"], "confidence": 0.5 },
+    { "id": "o6", "type": "wire", "label": "overhead line across street", "shape": "wire",
+      "from": {"forward": 40, "right": -15, "up": 6.5}, "to": {"forward": 40, "right": 15, "up": 6.5},
+      "seen_in": ["up", "front"], "confidence": 0.5 },
+    { "id": "o7", "type": "person", "label": "pedestrian walking on sidewalk", "shape": "cylinder",
+      "center": {"forward": 16, "right": -7.5}, "base_up": 0, "radius": 0.3, "height": 1.75,
+      "velocity": {"forward": 0.7, "right": 0}, "intent_notes": "walking ahead along the sidewalk, not toward the road",
+      "seen_in": ["left", "front"], "confidence": 0.9 }
+  ],
+  "scale_refs": ["parked SUV ≈ 4.7 m long", "lane ≈ 3.7 m", "street light ≈ 7 m tall"],
+  "notes": "Hand-made fixture. Default target {forward: 25, right: 0} lies past the parked SUV o1; a low direct hop clips o1. Overhead line o6 at 40 m for the REJECT beat. Pedestrian o7 starts 16.8 m from origin."
+}

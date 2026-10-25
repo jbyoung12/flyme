@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>flyme</title>
+  <style>
+    /* T0 shell layout only; T2 owns the look (PLAN.md §8). */
+    :root { --bg: #0b0c0e; --panel: #14161a; --line: #23262d; --text: #e7e9ee; --dim: #8a909c; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font: 15px/1.4 Inter, system-ui, -apple-system, sans-serif; }
+    #app { display: grid; height: 100vh; grid-template-columns: 260px 1fr 340px; grid-template-rows: 1fr 72px;
+      grid-template-areas: "cams view panel" "bar bar bar"; }
+    #cams { grid-area: cams; border-right: 1px solid var(--line); overflow: auto; padding: 12px; }
+    #view { grid-area: view; position: relative; overflow: hidden; }
+    #panel { grid-area: panel; border-left: 1px solid var(--line); overflow: auto; padding: 12px; }
+    #bar { grid-area: bar; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--panel); }
+    #bar button, #bar select { font: inherit; color: var(--text); background: #1d2026; border: 1px solid var(--line); border-radius: 10px; padding: 12px 20px; }
+    .dim { color: var(--dim); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="cams"><div class="dim">Cameras</div></aside>
+    <main id="view"></main>
+    <aside id="panel"><div class="dim">Plan</div></aside>
+    <footer id="bar">
+      <select id="site-picker"></select>
+      <button id="btn-scan">SCAN</button>
+      <button id="btn-plan">PLAN</button>
+      <button id="btn-hop">HOP</button>
+      <span id="status" class="dim"></span>
+    </footer>
+  </div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

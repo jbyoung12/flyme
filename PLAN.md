@@ -269,6 +269,21 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 ### 6.10 Run cache — `runs/<site_id>/`
 `reconstruct.events.jsonl`, `site.r0.json`, `site.r<N>.json`, `critique.r<N>.events.jsonl`, `critique.r<N>.json`, `plan-<ts>.events.jsonl`, `plan-<ts>.result.json`, `interaction_ids.json`, `env_id`. Everything is written as it happens, so replay is automatic.
 
+### 6.11 Server module contract (T0, implemented in `server/index.js`)
+`server/index.js` owns routing, SSE framing, the run cache, replay, validation, `applyPatch`, and writing `site.r<N>.json` / `critique.r<N>.json` / `plan-<ts>.result.json`. Track modules are loaded lazily (missing → 501; `npm run dev` restarts on edits) and only do the work. `sse` = `openSSE()` from `server/runs.js`: `sse.send(type, data)`, `sse.status(msg)`, `sse.log(msg)`; modules send progress events (`status|log|thought|tool|sim_result|attempt`), **index.js sends the final `site` / `critique` / `plan` event and `done`**. Modules throw on failure. Helpers for modules: `writeRun/readRun/runPath(siteId, name)` from `server/runs.js`.
+
+| Module (owner) | Export | Returns |
+|---|---|---|
+| `ingest.js` (Claude) | `ingest({siteId, rig, cameraSource(cam) → abs path\|null})` | `{cameras: [{id, mp4_url, keyframe_url}]}`; writes `sites/<id>/<cam>.mp4` + `sites/<id>/frames/<cam>.png`, served at `/media/<id>/<cam>.mp4`, `/media/<id>/frames/<cam>.png` |
+| `reconstruct.js` (Claude) | `reconstruct({siteId, rig}, sse)` | §6.3 site (index normalizes, validates, writes `site.r0.json`) |
+| `critique.js` (Claude) | `critique({siteId, round, renders, site, rig}, sse)` | §6.6 critique (index validates, applies patch, writes `critique.r<N>.json` + `site.r<N>.json`) |
+| `plan-agent.js` (Antigravity) | `planAgent({siteId, site, target, ts}, sse)`, `prewarm({siteId})` | §6.7 result **after server re-sim** (re-sim + disagreement flags are the module's job; use `shared/physics.js`). `prewarm` → `{env_id}` via `client.environments.create({sources})` (see `docs/latency.md`) |
+| `plan-local.js` (Antigravity) | `planLocal({siteId, site, target, ts}, sse)` | same §6.7 shape |
+| `video.js` (Antigravity) | `startVideo(body)`, `getVideo(job)` | `{job}`, `{status, url}` |
+| `resolve.js` (Claude) | `resolveDestination({site, text})` | `{target, explanation}` |
+
+Extra routes beyond §6.8: `GET /api/sites/:id` → `{...info, rig, site (latest), camera_media}`, `POST /api/plan/prewarm {site_id}`, `GET /api/runs/:id/:name`. Static: `/media/<id>/…` (mp4/png only, never `.mov`), `/fixtures/…`. Shared JSON schemas for `response_format`: `SITE_JSON_SCHEMA`, `CRITIQUE_JSON_SCHEMA`, `PARAMS_JSON_SCHEMA` in `shared/schema.js`.
+
 ## 7. Prompts (outline; files in `server/prompts/*.md`)
 
 - **reconstruct.md** (thinking high, JSON schema = §6.3): explain the rig (camera poses, HFOV, height 1.3 m, car-centric frame, clockwise yaw); ask to list every obstacle within ~40 m relevant to a vertical hop, estimate distances using scale references (car ≈ 4.5–4.8 m, lane ≈ 3.7 m, stall ≈ 2.7 m wide, door ≈ 2 m tall), for moving objects report position at the **last frame** of their clip + velocity (estimate from displacement across the clip) + `intent_notes`, and give confidence; prefer over-including hazards; put overhead hazards from the `up` clip.
@@ -376,3 +391,4 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 - `shared/constants.js`: **early draft with outdated values** — Track 0 rewrites it from §3.
 - `docs/gemini-api-notes.md`: verified Interactions API / Managed Agent / Omni snippets.
 - Nothing else is implemented yet.
+- **T0 done (11:40):** `shared/constants.js` (§3/§5), `shared/schema.js` (validators, `clampParams`, `applyPatch`, Gemini JSON schemas), `fixtures/sites/demo-street.json`, `server/index.js` + `server/runs.js` (§6.11), `web/index.html` shell, `scripts/smoke.mjs`, `docs/latency.md`. All deps confirmed at latest.

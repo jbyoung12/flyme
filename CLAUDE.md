@@ -11,3 +11,7 @@ Conventions:
 - Never commit `.env`, raw footage (`sites/*/*.mov|mp4`), or `runs/`.
 - No Tesla logos or trademarks in assets; say "flying car" in UI.
 - Commit trailer: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
+
+Run: `npm run dev` (http://localhost:5173, restarts on server edits; use `npm start` for the demo so a restart can't kill a live run) · `npm test` · `npm run smoke` (Argon + agent smoke; results in `docs/latency.md`). Add `?replay=1` or `FLYME_REPLAY=1` to replay cached SSE runs.
+
+Server: track modules plug into `server/index.js` via the contract in PLAN.md §6.11 (lazy-loaded, 501 until present). Fixture site: `fixtures/sites/demo-street.json`.
