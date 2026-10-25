@@ -282,6 +282,9 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 | `video.js` (Antigravity) | `startVideo(body)`, `getVideo(job)` | `{job}`, `{status, url}` |
 | `resolve.js` (Claude) | `resolveDestination({site, text})` | `{target, explanation}` |
 
+**Plan stream payloads (T4 emits, T2 consumes):** one `attempt` event per candidate as the server re-sim finishes it: `data = {round, id, label, params, sim}` where `sim` is the full §6.5 SimResult **with `samples`** (server's own sim, not the agent's claim) plus `agent_claim: {sim_verdict, failures}` and `disagrees: bool`. Optional `thought`/`tool`/`log` events in between. Final `plan` event `data` = §6.7 result where every `rounds[].candidates[]` also carries `sim` (same as its attempt) and the top level carries `disagreements: [{id, agent, server}]`; `verdict` is recomputed from the server sim (a chosen candidate the server rates UNSAFE → `REJECT`).
+**Critique payload:** final `critique` event `data` = §6.6 + `{round, patch_log}`; followed by `site` event with the patched site (`site.round = round`).
+
 Extra routes beyond §6.8: `GET /api/sites/:id` → `{...info, rig, site (latest), camera_media}`, `POST /api/plan/prewarm {site_id}`, `GET /api/runs/:id/:name`. Static: `/media/<id>/…` (mp4/png only, never `.mov`), `/fixtures/…`. Shared JSON schemas for `response_format`: `SITE_JSON_SCHEMA`, `CRITIQUE_JSON_SCHEMA`, `PARAMS_JSON_SCHEMA` in `shared/schema.js`.
 
 ## 7. Prompts (outline; files in `server/prompts/*.md`)
