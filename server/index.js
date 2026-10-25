@@ -252,7 +252,8 @@ const { createServer: createVite } = await import('vite');
 const vite = await createVite({
   root: path.join(ROOT, 'web'),
   appType: 'spa',
-  server: { middlewareMode: true, hmr: { server }, fs: { allow: [ROOT] } },
+  // allowedHosts: Cloud Run serves us on *.run.app; Vite's dev host check would 403 it.
+  server: { middlewareMode: true, hmr: { server }, fs: { allow: [ROOT] }, allowedHosts: true },
   logLevel: 'info',
 });
 app.use(vite.middlewares);
