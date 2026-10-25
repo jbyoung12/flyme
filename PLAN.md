@@ -40,7 +40,7 @@
 | D14 | Stretch 1 | Photoreal video via `gemini-omni-1.1-flash` from **our rendered hop clip** (not compositing into real footage). |
 | D15 | Stretch 2 | Natural-language destination. |
 | D16 | Specs | §3, labeled public vs. estimate in UI. |
-| D17 | Ground truth | Hybrid: Google Maps "Measure distance" for fixed objects, calibrated pacing for cars & landing spot (§13). Never sent to the model. |
+| D17 | Ground truth | **L-shaped pacing** from the stand point (forward steps, then 90° turn and sideways steps), stride calibrated with iPhone Measure (§13). No Google Maps. Never sent to the model. |
 | D18 | Repo | `github.com/jbyoung12/flyme`, **public now**. Raw footage & `.env` gitignored. |
 | D19 | Parallelism | Track 0 (contracts) serial first, then Tracks 1–4 parallel as Claude subagents in git worktrees; Antigravity may take 5a/5c (§9). |
 
@@ -311,11 +311,15 @@ Branches `track/<n>-<name>`, Claude subagents with `isolation: "worktree"`; the 
 
 ## 13. Filming + ground-truth protocol (user)
 
-1. Stand where a parked car would be (curb/parking spot); **drop a Google Maps pin / photo your feet** to mark the stand point. Front = direction the car faces.
+1. Stand where a parked car would be (curb/parking spot); **mark the stand point** (photo your feet / note a landmark) so you can pace from it. Front = direction the car faces.
 2. iPhone **0.5×**, landscape, 1080p 30fps, **chest height (~1.3 m)**, level, **still**, ~5 s each: front → right → back → left (turn 90° clockwise). Optional `up`: face front, tilt ~60° up.
 3. Sites: (a) hop over parked cars to a clear spot 10–30 m away; (b) overhead wires or tree canopy; (c) pedestrians.
 4. AirDrop to `sites/<site-id>/front.mov`, `right.mov`, `back.mov`, `left.mov`, `up.mov` (gitignored).
-5. Ground truth for site (a): calibrate stride on a known distance; pace to 2–3 parked cars and the landing spot; Google Maps "Measure distance" from the stand point to 2–3 fixed objects (poles, trees, hydrants). Record forward/right offsets (or distance + rough bearing) in `sites/<id>/truth.json`. Expected accuracy ±0.5–1 m.
+5. Ground truth for site (a), **L-shaped pacing**:
+   - Calibrate stride once: iPhone Measure app on a ~4 m stretch, count steps (or US lane dashes: dash + gap = 40 ft = 12.2 m).
+   - For 4–5 objects (parked cars — measure to their center, poles, trees, the landing spot): from the stand point walk straight along "front" (backward for things behind) until level with the object → `forward` steps; turn 90° and pace to it → `right` steps (negative = left).
+   - Skip anything that would require walking into traffic.
+   - Record in `sites/<id>/truth.json` as `{"<label>": {"forward": m, "right": m}, "stride_m": …}`. Expected accuracy ±5% (~±1 m at 20 m).
 
 ## 14. Risks & fallbacks
 
