@@ -30,7 +30,8 @@
 | D4 | Reconstruction | Direct `gemini-4-argon` call (video input) → `site.json`. |
 | D5 | Loop 1 (PS2 visual loop) | Browser renders scene from each known camera pose → Argon compares render vs. footage keyframe → JSON patch → re-render. ≤3 rounds. |
 | D6 | Destination | **Tap on 3D ground first.** Natural-language destination ("by the tree") is stretch. |
-| D7 | Loop 2 (flight plan) | **Antigravity Managed Agent** (`antigravity-preview-09-2026`, model `gemini-4-argon`) runs our simulator CLI in its sandbox, revises, returns all attempts. Local server-side loop = fallback. |
+| D7 | Loop 2 (flight plan) | **Antigravity Managed Agent** (`antigravity-preview-09-2026`, model `gemini-4-argon`) runs our simulator CLI in its sandbox. **Each round it proposes 4 diverse candidate routes; the sim checks all 4; if any are SAFE the agent picks one and explains why (margins + street context); if none, it revises all 4 from the failure reasons. Max 3 rounds (≤12 routes), then REJECT.** Local server-side loop = fallback with the same shape. |
+| D7b | Picking among SAFE routes | **Agent picks + explains** (not a fixed score). Sim supplies margins (clearance, air left, touchdown speed); agent weighs semantics the sim can't (flying over sidewalk/people, moving cars, landing near a pedestrian's path). |
 | D8 | Who judges safety | **Only our deterministic simulator/checker.** Server re-runs every attempt locally; UI verdict comes from our sim, never from model text. |
 | D9 | Argon's jobs | Reconstruct scene, critique render-vs-footage, choose route params, flag semantic risks, explain rejections. |
 | D10 | Hazards (v1) | **Core set:** vehicles (parked/moving), poles/signs, trees (trunk + canopy), overhead wires, pedestrians (5 m blast keep-out). Add surfaces/curbs/buildings only if time. |
@@ -43,6 +44,10 @@
 | D17 | Ground truth | **L-shaped pacing** from the stand point (forward steps, then 90° turn and sideways steps), stride calibrated with iPhone Measure (§13). No Google Maps. Never sent to the model. |
 | D18 | Repo | `github.com/jbyoung12/flyme`, **public now**. Raw footage & `.env` gitignored. |
 | D19 | Parallelism | Track 0 (contracts) serial first, then Tracks 1–4 parallel as Claude subagents in git worktrees; Antigravity may take 5a/5c (§9). |
+| D20 | Moving objects | **Required in v1.** Argon estimates each moving person/car's position at the **last frame of its clip** + velocity (m/s, car frame) + intent notes (reverse lights, heading to crosswalk). Sim moves them at constant velocity during the flight; agent judges intent the sim can't. |
+| D21 | Air resistance / wind | Simple quadratic **drag in the sim** (effect < 1%, shown if asked). **Wind not modeled** — covered by the 0.5 m clearance margin. |
+| D22 | "Now" | Flight `t = 0` = end of the clips (latest footage). Clips are sequential (not simultaneous like a real car's cameras) — accepted for the demo. UI shows **"plan valid ~10 s — rescan before HOP"**. |
+| D23 | Exhaust velocity | **500 m/s** (changed from 700 on Google mentors' advice: more accurate for cold-gas blowdown). |
 
 ## 3. Vehicle specs (locked)
 
@@ -54,13 +59,13 @@
 | Dry mass | **1,900 kg** | Estimate from "4000+ lb" (MKBHD relaying Tesla) |
 | Max thrust | **80 kN** total | Third-party analysis, not Tesla |
 | Max horizontal thrust | **40 kN** | Our estimate |
-| Exhaust velocity | **700 m/s** (Isp ≈ 71 s) | Physics estimate for cold compressed air |
+| Exhaust velocity (effective) | **500 m/s** (Isp ≈ 51 s) | Physics estimate for cold-gas blowdown + perimeter nozzle cant (per Google mentors on-site) |
 | Dimensions (L×W×H) | **4.3 × 2.0 × 1.15 m** | Estimate from photos |
 | 0–60 | < 0.59 s (Rocket) | Public (Teslarati) — UI flavor only |
 | Camera height | 1.3 m | Our rig (phone at chest height) |
 
 Safety limits: touchdown vertical < **3 m/s**, horizontal < **1 m/s**; clearance ≥ **0.5 m**; pedestrian keep-out ≥ **5 m**; landing within **1.5 m** of target; air remaining ≥ **25 kg**.
-Sanity target for Track 1 calibration: a ~25–30 m hop over a parked car is feasible; a 60 m hop fails on air.
+Sanity target for Track 1 calibration (at 500 m/s): a ~20 m hop over a parked car is feasible; a ~45 m hop fails on air. Track 1 reports the actual max feasible range.
 
 Sources: [TechCrunch](https://techcrunch.com/2026/10/15/tesla-reveals-spacex-powered-roadster-that-flies-and-falls-with-style/) · [Teslarati](https://www.teslarati.com/tesla-roadster-specs-configurations/) · [Space.com](https://www.space.com/technology/spacex-thrusters-just-made-a-tesla-roadster-fly-and-elon-musks-car-is-still-out-there-in-space) · [Tech Insider (80 kN)](https://tech-insider.org/tesla-roadster-flight-tech-80kn-thrust-explained-2026/)
 
@@ -70,10 +75,10 @@ Sources: [TechCrunch](https://techcrunch.com/2026/10/15/tesla-reveals-spacex-pow
 |---|---|---|---|
 | A. Ingest | `.mov` → 720p H.264 mp4; pick sharpest keyframe per clip (middle ±1 s, highest Laplacian variance or just middle frame) | server, ffmpeg | `POST /api/sites/:id/ingest` |
 | B. Reconstruct | Upload mp4s (Files API) + rig + schema → `site.json` (JSON schema output, thinking `high`) | Argon | `POST /api/sites/:id/reconstruct` (SSE) |
-| C. Loop 1 | Browser renders each camera view → POST renders → Argon (chained via `previous_interaction_id`, thinking `medium`) returns per-camera match score + issues + patch → apply → re-render. Stop when all cams ≥ 80 or 3 rounds. | browser + Argon | `POST /api/sites/:id/critique` (SSE) |
+| C. Loop 1 | Browser renders each camera view (type-colored solids + obstacle ID labels + 5 m ground grid) → POST renders → Argon (fast image-pair call with keyframes + renders + `site.json`, thinking `medium`, no video re-chaining) returns per-camera match score + issues + patch → `applyPatch` → re-render. Stop when all cams ≥ 80 or 3 rounds. | browser + Argon | `POST /api/sites/:id/critique` (SSE) |
 | D. Destination | Tap ground → `target {forward,right}` | browser | — |
-| E. Loop 2 | Managed Agent: seeded with sim code + site + target; runs `sim-cli` per candidate (≤6 runs), writes `/workspace/out/result.json`. Server streams agent steps, downloads result, **re-runs every attempt locally**. Sandbox pre-warmed at SCAN time. | Managed Agent | `POST /api/plan` (SSE) |
-| F. Playback | Attempts as red ghost arcs, final as blue; checklist, air gauge, log; HOP animates final with thruster puffs | browser | — |
+| E. Loop 2 | Managed Agent: seeded with sim code + site + target. Per round: propose **4 diverse candidates** → run `sim-cli` on each → if ≥1 SAFE, pick one + explain; else revise all 4 from failures. **Max 3 rounds.** Writes `/workspace/out/round-<n>.json` as it goes + `/workspace/out/result.json`. Server streams agent steps, downloads results, **re-runs every candidate locally**. Sandbox pre-warmed at SCAN time. | Managed Agent | `POST /api/plan` (SSE) |
+| F. Playback | Per round, a **fan of 4 arcs**: red (with failure reason label), green (SAFE), chosen one glowing blue; checklist + air gauge for the selected arc; log; HOP animates the chosen route with thruster puffs | browser | — |
 | G. Stretch 1 | Record rendered hop (canvas → webm ≤10 s) + site keyframe → Omni → mp4 | server bg job | `POST /api/video`, `GET /api/video/:job` |
 | H. Stretch 2 | "land by the tree" → Argon resolves to target using site.json + keyframes | Argon | `POST /api/resolve-destination` |
 
@@ -86,22 +91,23 @@ All in `shared/` — **zero dependencies, ESM, must run on Node 22** (sandbox) a
 - Direction `ĥ = target / |target|` in (forward,right); right-perpendicular `n̂ = (−ĥ.right, ĥ.forward)`.
 - Bow: `b(τ) = side_bow_m · 64 τ³ (1−τ)³`.
 - Horizontal position: `s(τ)·target + b(τ)·n̂`.
-- Vertical: `p = climb_bias`; if `p ≤ 0.5`: `a = 3, b = 3(1−p)/p`, else `b = 3, a = 3p/(1−p)`; `up(τ) = apex · τ^a (1−τ)^b / (p^a (1−p)^b)`.
+- Vertical: `p = climb_bias`; Mobius time-warp `τ̃ = (1−p)τ / ((1−p)τ + p(1−τ))` (peaks at `τ = p`, `τ̃ = 0.5`, smooth `C^∞` on `[0,1]`); `up(τ) = apex · 16 τ̃² (1−τ̃)²`.
 - Velocity/acceleration of the reference: central differences (h = 1e-4 s) on the analytic position.
 
 **Dynamics:** dt = 0.01 s, semi-implicit Euler, mass `m = dry + air`.
 - `a_cmd = a_ref + 36·(p_ref − p) + 10.8·(v_ref − v)`; `T_req = m·(a_cmd + g·ŷ)`.
-- Clamp: horizontal component ≤ 40 kN (scale horizontal only), then ‖T‖ ≤ 80 kN (scale vector). If air ≤ 0 → T = 0 (ballistic).
-- Saturation flag when clamping changed ‖T‖ by > 1%.
-- `air −= ‖T‖ / 700 · dt`.
-- Before liftoff: clamp `up ≥ 0`. Touchdown: `t > 0.2 s` and `up ≤ 0` → record velocities, stop. After `t > T` the reference holds target at up=0. Hard cap `T + 5 s`.
+- Clamp: first `T_req.up ≥ 0` (no downward thrust), then horizontal component ≤ 40 kN (scale horizontal only), then ‖T‖ ≤ 80 kN (scale vector). If air ≤ 0 → T = 0 (ballistic).
+- Saturation flag when horizontal/total clamping reduced ‖T‖ by > 1%.
+- `air −= ‖T‖ / 500 · dt`.
+- Drag (D21): `F = −½ ρ C_d A |v| v` per axis, ρ = 1.2 kg/m³, C_d = 1.0, A_horizontal = 2.3 m² (W×H), A_vertical = 8.6 m² (L×W). Added to the dynamics (not the reference). Report `peak.drag_N` in the summary. No wind.
+- Before liftoff: clamp `up ≥ 0`. After `t > T` the reference holds target horizontally with `up_ref = −0.5·(t − T)` (gentle settle). Touchdown: (`t ≥ 0.85·T` and `up ≤ 0.02 m`) or (`t > 0.2 s` and `up ≤ 0`) → clamp `up = 0`, record velocities, stop. Hard cap `T + 5 s`.
 - Emit a sample every 0.05 s.
 
 **Collision/clearance:** car = axis-aligned box (car never yaws; ignore tilt) centered at `(pos.forward, pos.right, pos.up + H/2)` with half-extents `(L/2, W/2, H/2)`.
 - Obstacles: `box` (oriented by `heading_deg`), `cylinder`, `wire` (segment, radius 0.05 m).
 - Distance = min over (car surface sample points → obstacle signed distance) ∪ (obstacle sample points → car-box signed distance). Sample spacing ≤ 0.25 m. Precompute obstacle samples once.
-- Ignore obstacles the car already touches at t=0 only if clearance at t=0 is ≥ 0 (parked neighbors); otherwise flag.
-- Moving obstacles (`velocity` set): translate by `velocity·t` during the sim (nice-to-have).
+- Takeoff grace at `t = 0`: if an obstacle starts with `0 < clearance(0) < 0.5 m` (or a `person` starts `< 5 m`), require only `collision` (`clearance > 0`) during liftoff (`t < 0.8 s`) while distance is non-decreasing; if an obstacle already overlaps at `t = 0` (`clearance(0) ≤ 0`, e.g. noisy parked-neighbor box), ignore it for `t < 0.5 s`.
+- Moving obstacles (`velocity` set) — **required (D20)**: position at time `t` = `center + velocity·t` (t = 0 is the end of the footage, D22). Applies to clearance, `pedestrian`, and `landing_zone` checks. Obstacle samples are translated, not recomputed.
 
 **Checks** (ids are a contract — UI and prompts reference them):
 
@@ -161,7 +167,7 @@ iPhone 0.5× ultrawide in video mode ≈ 95–105° HFOV; 100 is the default; lo
       "from": {"forward": 20, "right": -15, "up": 7}, "to": {"forward": 20, "right": 15, "up": 7},
       "seen_in": ["up"], "confidence": 0.5 },
     { "id": "o4", "type": "person", "label": "pedestrian on sidewalk", "shape": "cylinder",
-      "center": {"forward": 3, "right": -4}, "base_up": 0, "radius": 0.3, "height": 1.75,
+      "center": {"forward": 18, "right": -4}, "base_up": 0, "radius": 0.3, "height": 1.75,
       "velocity": {"forward": 0.8, "right": 0}, "seen_in": ["left"], "confidence": 0.9 }
   ],
   "scale_refs": ["parked sedan ≈ 4.7 m", "lane ≈ 3.7 m"],
@@ -171,6 +177,7 @@ iPhone 0.5× ultrawide in video mode ≈ 95–105° HFOV; 100 is the default; lo
 - `type` ∈ `vehicle | pole | sign | tree_trunk | tree_canopy | wire | person | building | barrier | other`.
 - `shape` ∈ `box` (needs `size`, `heading_deg`), `cylinder` (`radius`, `height`), `wire` (`from`, `to`). `base_up` = height of the shape's bottom (canopies, signs).
 - `surfaces[].type` ∈ `road | sidewalk | parking | grass | plaza | water | other` (surface rules are post-v1).
+- Moving objects: `center` = position at the **last frame of the clip it was seen in** (D22); `velocity` `{forward, right}` m/s; optional `intent_notes` string (e.g. "reverse lights on", "heading to crosswalk"). Static objects omit `velocity`.
 - Ground truth lives in a separate file `sites/<id>/truth.json`: `{ "<label or id>": {"forward":…, "right":…}, "stand_point": "…" }` — **never sent to the model**.
 
 ### 6.4 Flight params (`schema: "flyme.params/1"`)
@@ -214,13 +221,30 @@ Bounds (clamp + report if violated): apex 0.5–20 · duration 1–8 · side_bow
 ```json
 {
   "verdict": "SAFE",
+  "rounds": [
+    {
+      "n": 1,
+      "candidates": [
+        {"id": "r1a", "label": "high arc over sedan", "params": { }, "sim_verdict": "UNSAFE", "failures": ["air_reserve"]},
+        {"id": "r1b", "label": "low swerve right", "params": { }, "sim_verdict": "SAFE", "failures": [], "margins": {"min_clearance_m": 1.4, "air_remaining_kg": 96, "touchdown_v_ms": 1.2}},
+        {"id": "r1c", "label": "climb-first glide", "params": { }, "sim_verdict": "SAFE", "failures": [], "margins": { }},
+        {"id": "r1d", "label": "long gentle arc", "params": { }, "sim_verdict": "UNSAFE", "failures": ["clearance"]}
+      ],
+      "decision": "pick",
+      "chosen_id": "r1c",
+      "why": "r1b has more clearance but passes over the sidewalk where a pedestrian is walking; r1c stays over the road",
+      "revision_notes": null
+    }
+  ],
   "final_params": { },
-  "attempts": [ {"n": 1, "params": { }, "sim_verdict": "UNSAFE", "failures": ["clearance"], "why_next": "clipped SUV on climb; climb earlier"} ],
+  "chosen_id": "r1c",
   "semantic_notes": ["pedestrian walking toward landing zone in left cam"],
   "reject_reason": null
 }
 ```
-`verdict` ∈ `SAFE | REJECT`. Server re-simulates every attempt; if its result disagrees with the agent's claim, the server's result wins and the UI says so.
+- `verdict` ∈ `SAFE | REJECT`. `decision` ∈ `pick | revise | reject`. On `revise`, `revision_notes` explains what each new candidate changes and why.
+- Exactly 4 candidates per round, deliberately diverse (different apex / bow side / climb_bias); max 3 rounds.
+- Server re-simulates every candidate; if its result disagrees with the agent's claim, the server's result wins and the UI says so. The agent may only pick a candidate the server sim also rates SAFE.
 
 ### 6.8 Server HTTP API (Express, single process with Vite middleware, port 5173)
 | Method & path | Body → Response |
@@ -243,14 +267,14 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 - Agent steps map: `step.start` with `code_execution_call` → `tool`; `thought_summary` deltas → `thought`; text deltas → `log`.
 
 ### 6.10 Run cache — `runs/<site_id>/`
-`reconstruct.events.jsonl`, `site.r0.json`, `site.r<N>.json`, `critique.r<N>.json`, `plan-<ts>.events.jsonl`, `plan-<ts>.result.json`, `interaction_ids.json` (for chaining), `env_id`. Everything is written as it happens, so replay is automatic.
+`reconstruct.events.jsonl`, `site.r0.json`, `site.r<N>.json`, `critique.r<N>.events.jsonl`, `critique.r<N>.json`, `plan-<ts>.events.jsonl`, `plan-<ts>.result.json`, `interaction_ids.json`, `env_id`. Everything is written as it happens, so replay is automatic.
 
 ## 7. Prompts (outline; files in `server/prompts/*.md`)
 
-- **reconstruct.md** (thinking high, JSON schema = §6.3): explain the rig (camera poses, HFOV, height 1.3 m, car-centric frame, clockwise yaw); ask to list every obstacle within ~40 m relevant to a vertical hop, estimate distances using scale references (car ≈ 4.5–4.8 m, lane ≈ 3.7 m, stall ≈ 2.7 m wide, door ≈ 2 m tall), mark moving objects with velocity, and give confidence; prefer over-including hazards; put overhead hazards from the `up` clip.
-- **critique.md** (thinking medium, chained on reconstruct interaction so videos stay in context; inputs: for each camera the footage keyframe + our render + current site.json): compare object by object, score each camera 0–100, emit a minimal patch (§6.6) with evidence, `done: true` when all ≥ 80.
-- **plan-agent.md** (Managed Agent): files at `/workspace/flyme/` (`sim-cli.mjs`, `physics.js`, `checks.js`, `constants.js`, `geometry.js`), `/workspace/input/site.json`, `/workspace/input/target.json`. Rules: only the simulator decides safety; run sim for every candidate; ≤6 sim runs; read failures + SVG and reason about the fix; also consider semantic risks the sim doesn't model (people heading toward the zone, surface); never change target; write attempts + `/workspace/out/result.json` (§6.7); REJECT with a plain-English reason if no SAFE plan.
-- **plan-local.md** (fallback, `gemini-4-argon` thinking medium, JSON schema = §6.4): same rules; server runs the sim; ≤5 iterations.
+- **reconstruct.md** (thinking high, JSON schema = §6.3): explain the rig (camera poses, HFOV, height 1.3 m, car-centric frame, clockwise yaw); ask to list every obstacle within ~40 m relevant to a vertical hop, estimate distances using scale references (car ≈ 4.5–4.8 m, lane ≈ 3.7 m, stall ≈ 2.7 m wide, door ≈ 2 m tall), for moving objects report position at the **last frame** of their clip + velocity (estimate from displacement across the clip) + `intent_notes`, and give confidence; prefer over-including hazards; put overhead hazards from the `up` clip.
+- **critique.md** (thinking medium, standalone image-pair call without video chaining for low latency; inputs: for each camera the footage keyframe PNG + our labeled 3D render PNG + current `site.json`): compare object by object using the rendered obstacle IDs (`o1`, `o2`…) and 5 m ground grid, score each camera 0–100, emit a minimal patch (§6.6) with evidence, `done: true` when all ≥ 80.
+- **plan-agent.md** (Managed Agent): files at `/workspace/flyme/` (all `shared/*.{js,mjs}`: `sim-cli.mjs`, `physics.js`, `checks.js`, `constants.js`, `geometry.js`, `schema.js`, `plot-svg.js`), `/workspace/input/site.json`, `/workspace/input/target.json`. Rules: only the simulator decides safety; each round propose **4 deliberately different** candidates and run the sim on all 4; read failures + SVG; if any SAFE → pick one and explain the choice using margins **and** street context the sim doesn't model (people heading toward the zone, flying over sidewalk, moving cars); if none → revise all 4 from the failure reasons; **max 3 rounds**; never change target; write `/workspace/out/round-<n>.json` after each round + `/workspace/out/result.json` (§6.7); REJECT with a plain-English reason if no SAFE plan after round 3.
+- **plan-local.md** (fallback, `gemini-4-argon` thinking medium, JSON schema = 4 × §6.4 + decision): same rules and shape; server runs the sim on the 4 candidates and sends results back; max 3 rounds.
 - **omni.md** (stretch): `<FIRST_FRAME>` = photoreal-ized keyframe; reference video = our render; "white sports car lifts off on cold-gas thrusters with white vapor puffs, arcs over the parked car, lands softly; single continuous shot; no logos; no text".
 
 ## 8. UI spec (in-car screen)
@@ -258,10 +282,11 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 - Dark (`#0b0c0e`), 16:10 desktop / projector; big touch-sized controls; one font (Inter or system).
 - **Main 3D view (center):** dark ground, surfaces faintly tinted; vehicles as gray simplified car shapes (FSD-style), poles as cylinders, wires as thin lines, trees as trunk + sphere, **people as amber capsules with a 5 m keep-out ring**. White procedural car (wedge body, glass canopy, 4 wheels, 10 nozzle points that glow/puff when thrusting). Target = pulsing ring. Attempts = red dashed arcs; final = glowing blue tube. Collision point = red marker. Orbit controls + preset camera (chase cam during HOP).
 - **Left strip:** 4–5 camera tiles; toggle **Footage / Render / Blend** (opacity slider); per-tile match score badge from loop 1; issues listed under the tiles; round counter "Reconstruction round 2/3".
-- **Right panel:** verdict banner (`SAFE` / `UNSAFE — reason` / `REJECTED — reason`); checklist of the 9 checks with values; air gauge (250 kg bar with 25 kg reserve line, used/remaining); attempts list (click to replay any); live agent log (monospace, icons for thought / sim run / result).
+- **Right panel:** verdict banner (`SAFE` / `UNSAFE — reason` / `REJECTED — reason`); checklist of the 9 checks with values (for the selected arc); air gauge (250 kg bar with 25 kg reserve line, used/remaining); **rounds list: each round shows its 4 candidates as chips (red/green/blue) — click any to see its checks + replay it; the agent's "why I picked this" shown under the chosen one**; live agent log (monospace, icons for thought / sim run / result).
 - **Bottom bar:** site picker · **SCAN** · **PLAN** · **HOP** · **VIDEO** (stretch) · "ⓘ Specs" popover (§3 table with public/estimate badges) · replay indicator when cached.
 - **Footer stat (from eval):** "First-try plans safe: X% → after loop: Y%" and, if truth exists, "Reconstruction error: A m → B m".
-- Browser must implement `renderCameraViews(site, rig) → {camId: dataURL(1280×720 PNG)}` using the rig pose + HFOV, with a "reconstruction" style (flat gray solids, no UI overlays) — this is loop 1's render.
+- Moving people/cars drawn with a short velocity arrow and their predicted path during the hop; banner shows **"plan valid ~10 s — rescan before HOP"** (D22).
+- Browser must implement `renderCameraViews(site, rig) → {camId: dataURL(1280×720 PNG)}` using the rig pose + HFOV, with a "reconstruction critique" style (type-colored solids, floating obstacle `id` labels `o1`/`o2`…, and a 5 m ground distance grid; no HUD chrome) — this is loop 1's render so Argon can map visual errors directly to obstacle IDs and metric distances.
 
 ## 9. Tracks, ownership, acceptance
 
@@ -269,8 +294,8 @@ Branches `track/<n>-<name>`, Claude subagents with `isolation: "worktree"`; the 
 
 | Track | Owner | Files | Acceptance |
 |---|---|---|---|
-| **0. Contracts** (serial, first, ~20 min) | Integrator | `shared/constants.js` (rewrite from §3), `shared/schema.js` (validators for §6.3/6.4/6.6/6.7 + bounds clamp), `fixtures/sites/demo-street.json` (hand-made: parked car between start and a target ~25 m ahead, a pole, a wire, a pedestrian), `server/index.js` (Express + Vite middleware, mounts track routers, SSE helper, cache helper), `web/index.html` shell, `CLAUDE.md` | `npm run dev` serves a page; `GET /api/sites` works; smoke test: one `gemini-4-argon` call + one Antigravity hello (record env provisioning time & total latency in `docs/latency.md`) |
-| **1. Physics** | Claude subagent | `shared/physics.js`, `shared/checks.js`, `shared/geometry.js`, `shared/sim-cli.mjs`, `shared/plot-svg.js`, `shared/*.test.js` | `npm test` green; fixture: direct low hop clips the parked car (UNSAFE: collision/clearance), climb-early hop SAFE, 60 m hop fails air; deterministic; runs on Node 22 with zero deps; < 50 ms per sim |
+| **0. Contracts** (serial, first, ~20 min) | Integrator | `shared/constants.js` (rewrite from §3), `shared/schema.js` (validators for §6.3/6.4/6.6/6.7 + bounds clamp + deterministic `applyPatch(site, patch)`), `fixtures/sites/demo-street.json` (hand-made: parked car between start and a target ~25 m ahead, a pole, a wire, a pedestrian >5 m from origin), `server/index.js` (Express 5 + Vite middleware — avoid `*` wildcards, mounts track routers, SSE helper, cache helper), `web/index.html` shell, `CLAUDE.md` | `npm run dev` serves a page; `GET /api/sites` works; smoke test: one `gemini-4-argon` call + one Antigravity hello (record env provisioning time & total latency in `docs/latency.md`) |
+| **1. Physics** | Claude subagent | `shared/physics.js`, `shared/checks.js`, `shared/geometry.js`, `shared/sim-cli.mjs`, `shared/plot-svg.js`, `shared/*.test.js` | `npm test` green; fixture: direct low hop clips the parked car (UNSAFE: collision/clearance), climb-early hop SAFE, ~45 m hop fails air, pedestrian walking into the landing zone fails `pedestrian`, drag changes touchdown point by < 1%; deterministic; runs on Node 22 with zero deps; < 50 ms per sim |
 | **2. In-car UI** | Claude subagent | `web/**` (except shell from T0), `web/mock/*.json` | Works fully on mock SSE + fixture; tap target; playback of mocked attempts; `renderCameraViews` returns 5 PNGs; looks like §8 |
 | **3. Gemini pipeline** | Claude subagent | `server/ingest.js`, `server/gemini.js` (client, upload+poll, SSE adapters), `server/reconstruct.js`, `server/critique.js`, `server/prompts/reconstruct.md`, `server/prompts/critique.md` | On a real site folder: ingest produces mp4s + keyframes; reconstruct returns schema-valid site.json; critique round returns schema-valid patch; everything cached in `runs/` and replayable |
 | **4. Agent loop** | Claude subagent | `server/plan-agent.js`, `server/plan-local.js`, `server/prompts/plan-agent.md`, `server/prompts/plan-local.md` | With fixture site + target: agent run streams steps, downloads result.json, server re-sim agrees; local fallback finds SAFE plan in ≤5 iterations; env pre-warm function exported for SCAN |
@@ -300,13 +325,13 @@ Branches `track/<n>-<name>`, Claude subagents with `isolation: "worktree"`; the 
 |---|---|
 | 0:00–0:20 | Hook: Tesla's Oct 15 jump on a closed course → "before *your* Roadster hops on a real street, it should check." |
 | 0:20–1:10 | **SCAN**: camera tiles of the real street → 3D scene appears → Blend view shows mismatch → Argon: "missed the street light / SUV is 2 m farther" → patched → scores rise. (Sandbox pre-warms meanwhile.) |
-| 1:10–2:10 | Tap a spot across the street → **PLAN** → live agent log: attempt 1 clips the SUV (red arc, checklist red) → agent: "climb earlier" → SAFE (blue), air left shown. "The verdict is our simulator's, not the model's." |
+| 1:10–2:10 | Tap a **tricky** spot (tall vehicle close to the path) → **PLAN** → round 1: fan of 4 arcs, red ones labeled "clips SUV" / "air reserve" → agent revises → round 2: some green → agent picks one and says why ("more clearance one flies over the sidewalk where someone's walking") → glowing blue, air left shown. "The verdict is our simulator's; the choice is the AI's." |
 | 2:10–2:40 | **HOP** chase-cam animation (+ Omni clip if ready) |
 | 2:40–3:00 | Tap under the wires → **REJECTED: overhead line at 7 m** · footer numbers (first-try X% → Y%, reconstruction error A → B m) |
 
 ## 12. Measurement (baseline)
 
-- `scripts/eval.mjs`: per site, ≥10 targets sampled on open ground at 10–35 m. Compare **(a)** Argon single-shot params, **(b)** after loop (local mode for cost/speed), **(c)** naive default params. Report pass rates + mean attempts.
+- `scripts/eval.mjs`: per site, ≥10 targets sampled on open ground at 10–35 m. Compare **(a)** Argon single-shot (one candidate, no feedback), **(b)** full loop (4 candidates × ≤3 rounds; local mode for cost/speed), **(c)** naive default params. Report pass rates + mean rounds.
 - Reconstruction: per loop-1 round, mean position error vs. `truth.json` (matched by label), plus mismatch count.
 
 ## 13. Filming + ground-truth protocol (user)
