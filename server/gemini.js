@@ -64,6 +64,7 @@ export async function streamInteraction(params, { sse, siteId, label, timeoutMs 
     if (thought.trim()) sse?.send('thought', { text: thought.trim() });
     thought = '';
   };
+  try {
   for await (const ev of stream) {
     switch (ev.event_type) {
       case 'interaction.created':
@@ -98,6 +99,21 @@ export async function streamInteraction(params, { sse, siteId, label, timeoutMs 
       default:
         break;
     }
+  }
+  } catch (err) {
+    // A dropped stream ("terminated", socket reset) doesn't cancel the stored
+    // interaction: poll it to completion instead of failing the stage.
+    if (!id || /\b(4\d\d)\b/.test(String(err.status ?? ''))) throw err;
+    sse?.log(`${label}: stream dropped (${err.message}); recovering stored result`);
+    let ix = await client().interactions.get(id);
+    while (['in_progress', 'queued'].includes(ix.status)) {
+      await sleep(2000);
+      ix = await client().interactions.get(id);
+    }
+    if (ix.status !== 'completed') throw new Error(`${label}: interaction ${ix.status} after stream drop`);
+    text = ix.output_text ?? '';
+    usage = ix.usage;
+    status = ix.status;
   }
   flushThought();
   // Fallback: some streams end without text deltas; fetch the stored result.

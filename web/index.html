@@ -30,7 +30,8 @@
         <div id="site-name">—</div>
         <div id="pills"></div>
       </div>
-      <div id="hint">Tap the ground to choose a landing spot</div>
+      <div id="hint">Tap the ground to choose a landing spot (green = clear ground)</div>
+      <button id="suggest" hidden></button>
       <div id="target-readout" hidden></div>
       <div id="view-controls">
         <button data-view="overview" title="Overview">Overview</button>
@@ -68,8 +69,9 @@
       <button id="btn-hop" class="big hop" disabled>HOP</button>
       <button id="btn-video" class="big ghost" disabled title="Photoreal video (stretch)">VIDEO</button>
       <div class="seg small-seg" id="plan-mode" title="Planner">
-        <button data-mode="agent" class="on">Agent</button>
-        <button data-mode="local">Local</button>
+        <button data-mode="search" class="on" title="Simulator searches 400 routes; Argon judges the safe ones against the footage">Search</button>
+        <button data-mode="agent" title="Managed Agent proposes routes and runs our simulator in its sandbox">Agent</button>
+        <button data-mode="local" title="Argon proposes 4 routes per round; our simulator checks them">Local</button>
       </div>
       <button id="btn-replay" class="toggle" title="Replay cached runs">Replay</button>
       <button id="btn-specs" class="toggle" title="Vehicle specs">ⓘ Specs</button>

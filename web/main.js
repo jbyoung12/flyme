@@ -5,6 +5,7 @@
 // ?mock=1 (or any 501 from a track route) replays web/mock/*.json instead.
 import { DEFAULT_RIG, PROVENANCE, MAX_CRITIQUE_ROUNDS, MAX_PLAN_ROUNDS, CAR } from '../shared/constants.js';
 import { normalizeSite, applyPatch } from '../shared/schema.js';
+import { landableMap } from '../shared/landable.js';
 import { createScene } from './scene.js';
 import { createCams } from './cams.js';
 import { createPanel } from './panel.js';
@@ -21,7 +22,7 @@ const S = {
   siteId: null, rig: DEFAULT_RIG, site: null, media: [],
   target: null,
   rounds: [], cands: new Map(), selectedKey: null, chosenKey: null, result: null,
-  busy: null, mode: 'agent', replay: params.get('replay') === '1', usedMock: MOCK,
+  busy: null, mode: 'search', replay: params.get('replay') === '1', usedMock: MOCK,
 };
 
 // ---------------------------------------------------------------- modules
@@ -120,6 +121,7 @@ async function loadSite(id) {
   resetPlan();
   setTarget(null);
   scene.setSite(S.site);
+  showZones();
   cams.setCameras(S.rig, S.media);
   cams.clearScores();
   cams.setRound(S.site ? S.site.round ?? 0 : null, { done: (S.site?.round ?? 0) > 0 });
@@ -229,6 +231,7 @@ async function scan() {
       const flash = (patchLog ?? []).filter((p) => p.applied && p.op !== 'remove').map((p) => p.id);
       S.site = normalizeSite(patched);
       scene.setSite(S.site, { flash });
+      showZones();
       cams.setRound(round, { done: crit.done, busy: !crit.done });
       if (crit.done) break;
     }
@@ -337,6 +340,13 @@ function finalizePlan(result) {
   } else {
     const reason = result.reject_reason ?? 'no safe route in 3 rounds';
     panel.banner('reject', 'REJECTED', reason);
+    const sug = result.suggested_target;
+    if (sug) {
+      const b = $('suggest');
+      b.hidden = false;
+      b.textContent = `Land ${fmt(sug.offset_m, 1)} m away instead? (${fmt(sug.forward, 1)}, ${fmt(sug.right, 1)}) → PLAN`;
+      b.onclick = () => { b.hidden = true; setTarget({ forward: sug.forward, right: sug.right }); plan(); };
+    }
     const lr = lastRound?.candidates?.[0];
     if (lr) select(lr.key);
   }
@@ -354,9 +364,10 @@ async function plan() {
     return;
   }
   resetPlan();
+  $('suggest').hidden = true;
   setBusy('plan');
   panel.log('log', { message: `— PLAN → ${fmt(S.target.forward, 1)} m ahead, ${fmt(S.target.right, 1)} m right (${S.mode}) —` });
-  panel.banner('busy', `Planning — round 1/${MAX_PLAN_ROUNDS}`, S.mode === 'agent' ? 'Managed Agent running our simulator in its sandbox' : 'Local planner + our simulator');
+  panel.banner('busy', `Planning — round 1/${MAX_PLAN_ROUNDS}`, ({ agent: 'Managed Agent running our simulator in its sandbox', search: 'Simulator searching 400 routes · Argon judging them against the footage' })[S.mode] ?? 'Local planner + our simulator');
   status('Planning…');
   const mock = S.target.forward > 35 ? 'plan-reject' : 'plan';
   try {
@@ -416,6 +427,10 @@ async function video() {
 }
 
 // ---------------------------------------------------------------- target
+function showZones() {
+  try { scene.setZones(S.site ? landableMap(S.site) : null); } catch (err) { console.warn('landable map failed', err); }
+}
+
 function setTarget(t) {
   S.target = t;
   scene.setTarget(t);

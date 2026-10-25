@@ -180,7 +180,7 @@ app.post('/api/plan', async (req, res) => {
   const { site_id: siteId, site: inSite, target, mode = 'agent' } = req.body ?? {};
   if (!SITE_ID.test(siteId ?? '')) return res.status(400).json({ error: 'site_id required' });
   if (isReplay(req)) return replaySSE(res, siteId, latestRun(siteId, /^plan-\d+\.events\.jsonl$/));
-  const [modName, fn] = mode === 'local' ? ['plan-local', 'planLocal'] : ['plan-agent', 'planAgent'];
+  const [modName, fn] = { local: ['plan-local', 'planLocal'], search: ['plan-search', 'planSearch'] }[mode] ?? ['plan-agent', 'planAgent'];
   const plan = await need(res, modName, fn);
   if (!plan) return;
   const ts = Date.now();

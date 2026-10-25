@@ -218,3 +218,7 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
   #app { grid-template-rows: 1fr 76px; }
   .big, #bar select { height: 52px; }
 }
+
+#suggest { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 5;
+  font: inherit; font-size: 16px; color: #fff; background: #1f6feb; border: 0; border-radius: 12px; padding: 14px 22px; cursor: pointer; box-shadow: 0 6px 24px #0008; }
+#suggest[hidden] { display: none; }

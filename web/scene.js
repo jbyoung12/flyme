@@ -260,6 +260,24 @@ export function createScene(container, { onTap } = {}) {
   targetGroup.visible = false;
   scene.add(targetGroup);
 
+  // ---------------------------------------------------------------- landing zones
+  // Instant landable-ground overlay (shared/landable.js): green tiles where the
+  // parked car would clear every obstacle and person.
+  let zoneMesh = null;
+  function setZones(map) {
+    if (zoneMesh) { scene.remove(zoneMesh); zoneMesh.geometry.dispose(); zoneMesh.material.dispose(); zoneMesh = null; }
+    const ok = (map?.cells ?? []).filter((c) => c.ok);
+    if (!ok.length) return;
+    const size = map.step_m * 0.9;
+    const geo = new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: '#2fd27a', transparent: true, opacity: 0.16, depthWrite: false });
+    zoneMesh = new THREE.InstancedMesh(geo, mat, ok.length);
+    const m = new THREE.Matrix4();
+    ok.forEach((c, i) => { m.makeTranslation(c.right, 0.02, -c.forward); zoneMesh.setMatrixAt(i, m); });
+    zoneMesh.renderOrder = -1;
+    scene.add(zoneMesh);
+  }
+
   function setTarget(t) {
     targetGroup.visible = Boolean(t);
     if (!t) return;
@@ -543,7 +561,7 @@ export function createScene(container, { onTap } = {}) {
   placeCar({ forward: 0, right: 0, up: 0 });
 
   return {
-    setSite, setTarget, addCandidate, updateCandidate, setPlanView, clearPlan,
+    setSite, setTarget, setZones, addCandidate, updateCandidate, setPlanView, clearPlan,
     playRoute, resetCar, setView, highlight, recordHop, setObstacleTime,
     get playing() { return Boolean(play); },
     canvas: renderer.domElement,
