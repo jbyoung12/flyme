@@ -11,6 +11,7 @@ import { CAR, SAFETY, PLAN_VALID_S } from '../shared/constants.js';
 import { obstacleObject, surfaceObjects, toThree, disposeTree } from './site-meshes.js';
 import { buildFlyingCar, glowTexture } from './car-model.js';
 import { esc, fmt } from './format.js';
+import { createFootageProjection } from './footage-projection.js';
 
 const BG = '#0b0c0e';
 const COLORS = { unsafe: '#ff4d4f', safe: '#2fd27a', chosen: '#3d8bff', amber: '#ffb020' };
@@ -72,6 +73,15 @@ export function createScene(container, { onTap } = {}) {
   grid.material.opacity = 0.7;
   scene.add(grid);
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  // Photo mode: real footage projected onto the ground + a 360° backdrop.
+  const photo = createFootageProjection(scene, { bg: BG });
+  function setPhoto(on) {
+    photo.setVisible(on);
+    siteGroup?.traverse((o) => { if (o.userData.surface) o.visible = !on; });
+    grid.material.opacity = on ? 0.25 : 0.7;
+    scene.fog.near = on ? 120 : 55;
+    scene.fog.far = on ? 400 : 150;
+  }
 
   const lineMats = new Set();
   const lineMat = (opts) => {
@@ -168,15 +178,17 @@ export function createScene(container, { onTap } = {}) {
   }
 
   function setSite(next, { flash = [] } = {}) {
+    photo.setOcclusion(next);
     clearSite();
     site = next;
     if (!site) return;
-    for (const s of surfaceObjects(site, 'fsd')) siteGroup.add(s);
+    for (const s of surfaceObjects(site, 'fsd')) { s.userData.surface = true; s.visible = !photo.visible; siteGroup.add(s); }
     const flashSet = new Set(flash);
     for (const o of site.obstacles ?? []) {
       let obj;
       try { obj = obstacleObject(o, 'fsd'); } catch (err) { console.warn('scene: bad obstacle', o?.id, err); continue; }
       siteGroup.add(obj);
+      obj.userData.box = new THREE.Box3().setFromObject(obj).expandByScalar(0.6);
       const e = { o, obj, mats: [], flashT: flashSet.has(o.id) ? 0 : null };
       obj.traverse((m) => {
         if (m.material?.emissive) e.mats.push({ m: m.material, base: m.material.emissive.clone(), baseI: m.material.emissiveIntensity });
@@ -554,6 +566,8 @@ export function createScene(container, { onTap } = {}) {
     updateObstacleFx(dt, time);
     if (!play) car.userData.setThrust(0);
     controls.update();
+    // Hide any obstacle the camera is inside (e.g. a tree canopy behind the car).
+    for (const c of siteGroup.children) if (c.userData.box) c.visible = !c.userData.box.containsPoint(camera.position);
     renderer.render(scene, camera);
     labels.render(scene, camera);
   });
@@ -561,6 +575,7 @@ export function createScene(container, { onTap } = {}) {
   placeCar({ forward: 0, right: 0, up: 0 });
 
   return {
+    setFootage: photo.setFootage, setPhoto, get photo() { return photo.visible; },
     setSite, setTarget, setZones, addCandidate, updateCandidate, setPlanView, clearPlan,
     playRoute, resetCar, setView, highlight, recordHop, setObstacleTime,
     get playing() { return Boolean(play); },

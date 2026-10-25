@@ -9,6 +9,24 @@ const BODY = [[0.5, 0.2], [0.49, 0.3], [0.4, 0.38], [0.12, 0.5], [-0.3, 0.58], [
 const CANOPY = [[0.16, 0.48], [0.0, 0.88], [-0.12, 0.96], [-0.26, 0.94], [-0.4, 0.57]];
 
 let glowTex = null;
+// Radial white→black mask for alphaMap (uses the green channel, so the
+// colour itself must fade, not just the alpha).
+let shadowTex = null;
+function shadowTexture() {
+  if (shadowTex) return shadowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, '#fff');
+  grad.addColorStop(0.45, '#888');
+  grad.addColorStop(1, '#000');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  shadowTex = new THREE.CanvasTexture(c);
+  return shadowTex;
+}
+
 export function glowTexture() {
   if (glowTex) return glowTex;
   const c = document.createElement('canvas');
@@ -94,7 +112,7 @@ export function buildFlyingCar() {
   // Soft ground shadow blob (cheaper than shadow maps, reads well on dark ground)
   const shadow = new THREE.Mesh(
     new THREE.PlaneGeometry(W * 1.5, L * 1.25).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: glowTexture(), color: '#000000', transparent: true, opacity: 0.55, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ alphaMap: shadowTexture(), color: '#000000', transparent: true, opacity: 0.55, depthWrite: false }),
   );
   shadow.renderOrder = 1;
 

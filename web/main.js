@@ -103,7 +103,7 @@ async function initSites() {
   const picker = $('site-picker');
   picker.innerHTML = sites.map((s) => `<option value="${esc(s.id)}">${esc(s.name ?? s.id)}${s.has_site === false ? ' (not scanned)' : ''}</option>`).join('');
   const want = params.get('site');
-  const first = sites.find((s) => s.id === want) ?? sites.find((s) => s.id === 'demo-street') ?? sites[0];
+  const first = sites.find((s) => s.id === want) ?? sites.find((s) => s.id === 'bike-rack' && s.has_site) ?? sites.find((s) => s.id === 'demo-street') ?? sites[0];
   picker.value = first.id;
   await loadSite(first.id);
 }
@@ -122,6 +122,7 @@ async function loadSite(id) {
   setTarget(null);
   scene.setSite(S.site);
   showZones();
+  showFootage();
   cams.setCameras(S.rig, S.media);
   cams.clearScores();
   cams.setRound(S.site ? S.site.round ?? 0 : null, { done: (S.site?.round ?? 0) > 0 });
@@ -169,7 +170,7 @@ async function scan() {
         const r = await fetch(`/api/sites/${id}/ingest`, { method: 'POST' });
         if (r.ok) {
           const j = await r.json();
-          if (j.cameras) { S.media = j.cameras; cams.setMedia(j.cameras); }
+          if (j.cameras) { S.media = j.cameras; cams.setMedia(j.cameras); showFootage(); }
           panel.log('log', { message: `ingest: ${j.cameras?.length ?? 0} cameras transcoded` });
         } else panel.log('log', { message: `ingest: HTTP ${r.status}${r.status === 501 ? ' (not implemented yet)' : ''}` });
       } catch (err) { panel.log('log', { message: `ingest failed: ${err.message}` }); }
@@ -232,6 +233,7 @@ async function scan() {
       S.site = normalizeSite(patched);
       scene.setSite(S.site, { flash });
       showZones();
+      showFootage();
       cams.setRound(round, { done: crit.done, busy: !crit.done });
       if (crit.done) break;
     }
@@ -432,6 +434,14 @@ async function video() {
 }
 
 // ---------------------------------------------------------------- target
+// Photo mode needs the transcoded keyframes; falls back to the model look.
+async function showFootage() {
+  const ok = await scene.setFootage(S.rig, S.media, S.site?.camera_horizons).catch(() => false);
+  const on = ok && $('btn-photo').classList.contains('on');
+  scene.setPhoto(on);
+  $('btn-photo').disabled = !ok;
+}
+
 function showZones() {
   try { scene.setZones(S.site ? landableMap(S.site) : null); } catch (err) { console.warn('landable map failed', err); }
 }
@@ -526,3 +536,9 @@ if (params.get('target')) {
   const [f, r] = params.get('target').split(',').map(Number);
   if (Number.isFinite(f) && Number.isFinite(r)) setTarget({ forward: f, right: r });
 }
+
+$('btn-photo').addEventListener('click', (e) => {
+  const b = e.currentTarget;
+  b.classList.toggle('on');
+  scene.setPhoto(b.classList.contains('on'));
+});
