@@ -26,6 +26,9 @@ const VIEWS = {
   top: { pos: [0, 58, -13.99], target: [0, 0, -14] },
   side: { pos: [32, 7, -12], target: [0, 2.5, -12] },
 };
+// Hop playback from the Driver view: tripod behind the parked car.
+const TRIPOD = new THREE.Vector3(0, 2.4, 6.5);
+const PREROLL_S = 0.8;
 const MARKER_CHECKS = ['collision', 'clearance', 'pedestrian', 'landing_zone'];
 
 function label(html, cls) {
@@ -630,44 +633,47 @@ export function createScene(container, { onTap } = {}) {
     if (play?.resolve) play.resolve();
     controls.enabled = !chase;
     if (chase) setPlanView({ hop: true });
+    // Driver view: the eye sits where the car is parked, so step back to a
+    // tripod behind it first (pre-roll, no thrust) and keep the car in shot.
+    const tripod = chase && viewName === 'pov' && !world;
+    if (tripod) { controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI * 0.95; } // setView restores
     return new Promise((resolve) => {
-      play = { sim, t: 0, speed, chase, resolve, hold: 0, keep, onTick, end: sim.samples[sim.samples.length - 1].t };
+      play = { sim, t: tripod ? -PREROLL_S : 0, speed, chase, resolve, hold: 0, keep, onTick, end: sim.samples[sim.samples.length - 1].t };
     });
   }
 
   function stepPlay(dt) {
     if (!play) return;
     const p = play;
-    p.t += dt * p.speed;
-    const s = sampleAt(p.sim.samples, Math.min(p.t, p.end));
-    const flying = p.t < p.end;
+    p.t += p.t < 0 ? dt : dt * p.speed;
+    const pre = p.t < 0;
+    const s = sampleAt(p.sim.samples, THREE.MathUtils.clamp(p.t, 0, p.end));
+    const flying = !pre && p.t < p.end;
     const level = flying ? (s.thrust_kN ?? 20) / (CAR.maxThrustN / 1000) : 0;
     placeCar(s, level);
     trimTube(car.position);
     // Small visual pitch from forward acceleration (sim ignores tilt).
-    const ahead = sampleAt(p.sim.samples, Math.min(p.t + 0.1, p.end));
+    const ahead = sampleAt(p.sim.samples, THREE.MathUtils.clamp(p.t + 0.1, 0, p.end));
     const vF = (ahead.forward - s.forward) / 0.1;
     car.rotation.x = THREE.MathUtils.lerp(car.rotation.x, flying ? THREE.MathUtils.clamp(-vF * 0.006, -0.08, 0.08) : 0, 0.1);
     if (flying) emit(level, dt);
-    setObstacleTime(Math.min(p.t, p.end));
-    p.onTick?.(s, p.t);
+    setObstacleTime(THREE.MathUtils.clamp(p.t, 0, p.end));
+    if (!pre) p.onTick?.(s, p.t);
     if (p.chase && world) {
       // fixed camera: the generated picture only matches this pose
     } else if (p.chase && viewName === 'pov') {
-      // Tripod shot: stay at the rig point (footage undistorted) and pan to
-      // follow the car; moving the eye would smear the projection.
+      // Tripod shot: a few metres behind the rig point (footage barely
+      // shifts) and pan to follow the car.
       const k = 1 - Math.exp(-dt * 4);
-      camera.position.lerp(new THREE.Vector3(...VIEWS.pov.pos), k);
-      const away = car.position.clone().setY(0).length();
-      const look = away < 3 ? new THREE.Vector3(...VIEWS.pov.target) : car.position.clone().add(new THREE.Vector3(0, 0.4, 0));
-      controls.target.lerp(look, k);
+      camera.position.lerp(TRIPOD, k);
+      controls.target.lerp(car.position.clone().add(new THREE.Vector3(0, 0.6, -3)), k);
     } else if (p.chase) {
       const desired = car.position.clone().add(new THREE.Vector3(2.5, 3.6 + car.position.y * 0.15, 10.5));
       const k = 1 - Math.exp(-dt * 3.5);
       camera.position.lerp(desired, k);
       controls.target.lerp(car.position.clone().add(new THREE.Vector3(0, 0.8, -7)), k);
     }
-    if (!flying) {
+    if (!flying && !pre) {
       p.hold += dt;
       if (p.hold > 0.9) {
         play = null;
