@@ -56,7 +56,7 @@ export function runChecks(site, simTrace, preparedObs) {
     const overlapAtStart = c0 <= 0;
     const graceClearanceAtStart = c0 > 0 && c0 < SAFETY.minClearanceM;
 
-    const ped0 = isPerson ? carToPersonHorizontalDistance2D(p0Pos, obs, 0) : Infinity;
+    const ped0 = isPerson ? carToObstacleClearance3D(p0Pos, obs, 0) : Infinity;
     const gracePedAtStart = isPerson && ped0 > 0 && ped0 < SAFETY.pedestrianKeepOutM;
 
     let maxCSoFar = c0;
@@ -75,9 +75,11 @@ export function runChecks(site, simTrace, preparedObs) {
 
       const carPos = { forward: fr.forward, right: fr.right, up: fr.up };
 
-      // 3. Pedestrian check (horizontal distance >= 5 m, with takeoff grace if 0 < p(0) < 5 m)
+      // 3. Pedestrian check: 3D distance car-box → person ≥ 5 m (thruster blast
+      // weakens with distance in every direction, so flying well above people
+      // counts), with takeoff grace if 0 < p(0) < 5 m while they only get farther away.
       if (isPerson) {
-        const pDist = carToPersonHorizontalDistance2D(carPos, obs, t);
+        const pDist = carToObstacleClearance3D(carPos, obs, t);
         if (gracePedActive) {
           if (pDist >= maxPedSoFar - 1e-4 && pDist < SAFETY.pedestrianKeepOutM) { // grace lasts while they only get farther away
             maxPedSoFar = Math.max(maxPedSoFar, pDist);

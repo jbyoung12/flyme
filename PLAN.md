@@ -115,7 +115,7 @@ All in `shared/` — **zero dependencies, ESM, must run on Node 22** (sandbox) a
 |---|---|
 | `collision` | min clearance > 0 |
 | `clearance` | min clearance ≥ 0.5 m (excluding people) |
-| `pedestrian` | min horizontal distance car-box → any `person` ≥ 5 m |
+| `pedestrian` | min **3D** distance car-box → any `person` ≥ 5 m (changed 2026-10-25 with the user: flying well above people counts; was horizontal-only) |
 | `thrust_limit` | no saturation where tracking error > 0.3 m |
 | `touchdown_vertical` | \|v_up\| < 3 m/s |
 | `touchdown_horizontal` | \|v_horizontal\| < 1 m/s |

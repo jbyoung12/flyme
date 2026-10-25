@@ -25,7 +25,7 @@ export const SAFETY = {
   maxTouchdownVerticalMs: 3.0,
   maxTouchdownHorizontalMs: 1.0,
   minClearanceM: 0.5,
-  pedestrianKeepOutM: 5.0, // thruster blast radius around people
+  pedestrianKeepOutM: 5.0, // thruster blast radius around people (3D distance: above counts)
   landingToleranceM: 1.5,
   airReserveKg: 25, // 10% of air
 };

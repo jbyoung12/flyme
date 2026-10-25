@@ -15,8 +15,11 @@ export function shapeGrid({ full = true } = {}) {
   const cb = [0.45, 0.6];
   const vd = [0, 0.25];
   const out = [];
-  for (const v of vd) for (const c of cb) for (const b of bow) for (const a of apex) for (const t of dur) {
-    out.push({ apex_height_m: a, duration_s: t, side_bow_m: b, climb_bias: c, horizontal_delay: 0.05, vertical_drop: v });
+  // horizontal_delay 0.25 = climb straight up first (clears people/objects
+  // right next to the car before moving sideways).
+  const hd = full ? [0.05, 0.25] : [0.05];
+  for (const h of hd) for (const v of vd) for (const c of cb) for (const b of bow) for (const a of apex) for (const t of dur) {
+    out.push({ apex_height_m: a, duration_s: t, side_bow_m: b, climb_bias: c, horizontal_delay: h, vertical_drop: v });
   }
   return out;
 }

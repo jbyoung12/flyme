@@ -41,7 +41,7 @@ export function describeRoute(site, sim) {
     const car = { forward: s.forward, right: s.right, up: s.up };
     prepared.forEach((p, i) => {
       const o = site.obstacles[i];
-      const d = o.type === 'person' ? carToPersonHorizontalDistance2D(car, p, s.t) : carToObstacleClearance3D(car, p, s.t);
+      const d = carToObstacleClearance3D(car, p, s.t);
       const cur = near.get(o.id);
       if (!cur || d < cur.d) near.set(o.id, { d, t: s.t, up: s.up, o });
     });
@@ -177,7 +177,7 @@ function roundCandidate(id, label, e) {
 export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_RIG, wait_s: waitS = 0, judgeWith = 'agent' }, sse) {
   const site = siteAfter(siteNow, waitS);
   if (waitS) sse.log(`planning for departure in ${waitS} s: moving people and cars advanced by their velocity`);
-  sse.status('simulator: searching 400 route shapes to the landing spot');
+  sse.status('simulator: searching 800 flight paths to the landing spot');
   const t0 = Date.now();
   const found = await searchRoutesParallel(site, target);
   sse.log(`simulator: ${found.safe.length} of ${found.tried} route shapes are SAFE (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
@@ -204,7 +204,7 @@ export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_
     const tooClose = site.obstacles.map((o, i) => {
       if (o.type !== 'person') return null;
       let d = Infinity;
-      for (const smp of best.samples) d = Math.min(d, carToPersonHorizontalDistance2D(smp, prepared[i], smp.t));
+      for (const smp of best.samples) d = Math.min(d, carToObstacleClearance3D(smp, prepared[i], smp.t));
       return d < 5 ? `${o.id} ${o.label} (${Math.max(d, 0).toFixed(1)} m)` : null;
     }).filter(Boolean);
     const other = [...new Set(show.flatMap((e) => e.sim.checks.filter((c) => !c.pass && c.id !== 'pedestrian').map((c) => c.message)))].slice(0, 2);
