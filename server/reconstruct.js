@@ -4,9 +4,10 @@
 
 import fs from 'node:fs';
 import { CAR } from '../shared/constants.js';
-import { SITE_JSON_SCHEMA } from '../shared/schema.js';
+import { SITE_JSON_SCHEMA, normalizeSite } from '../shared/schema.js';
 import { uploadFile, streamInteraction, parseJson, loadPrompt, fill } from './gemini.js';
-import { mp4Path } from './ingest.js';
+import { mp4Path, keyframePath } from './ingest.js';
+import { applyAnchors } from './anchors.js';
 import { readRun } from './runs.js';
 
 const YAW_NAMES = { 0: 'forward', 90: 'right', 180: 'back', 270: 'left' };
@@ -50,8 +51,12 @@ export async function reconstruct({ siteId, rig }, sse) {
 
   const input = [];
   cams.forEach((c, i) => {
-    input.push({ type: 'text', text: `Camera \`${c.id}\` (yaw ${c.yaw_deg}°, pitch ${c.pitch_deg}°):` });
-    input.push({ type: 'video', uri: files[i].uri, mime_type: files[i].mimeType });
+    input.push({ type: 'text', text: `Camera \`${c.id}\` (yaw ${c.yaw_deg}°, pitch ${c.pitch_deg}°) — video:` });
+    input.push({ type: 'video', uri: files[i].uri, mime_type: files[i].mimeType, resolution: process.env.FLYME_VIDEO_RES ?? 'high' });
+    if (fs.existsSync(keyframePath(siteId, c.id))) {
+      input.push({ type: 'text', text: `Camera \`${c.id}\` — KEYFRAME (1280×720, from the middle of the clip; use it for anchors and the horizon):` });
+      input.push({ type: 'image', data: fs.readFileSync(keyframePath(siteId, c.id)).toString('base64'), mime_type: 'image/png' });
+    }
   });
   input.push({ type: 'text', text: fill(loadPrompt('reconstruct.md'), { ...rigVars(rig, cams), site_id: siteId, timeline: timelineText(siteId) }) });
 
@@ -62,7 +67,9 @@ export async function reconstruct({ siteId, rig }, sse) {
     response_format: { type: 'text', mime_type: 'application/json', schema: SITE_JSON_SCHEMA },
   }, { sse, siteId, label: 'reconstruct' });
 
-  const site = parseJson(text, 'reconstruct');
-  sse.log(`reconstructed ${site.obstacles?.length ?? 0} obstacles, ${site.surfaces?.length ?? 0} surfaces`);
+  const raw = parseJson(text, 'reconstruct');
+  sse.log(`reconstructed ${raw.obstacles?.length ?? 0} obstacles, ${raw.surfaces?.length ?? 0} surfaces`);
+  const { site, moved } = applyAnchors(normalizeSite(raw), rig, readRun(siteId, 'clips.json'));
+  sse.log(`ground-anchored ${moved.length} static obstacles`, { moved });
   return site;
 }

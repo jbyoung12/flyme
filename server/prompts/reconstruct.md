@@ -18,6 +18,12 @@ For a camera with yaw Y and pitch 0, let a point in the frame be at horizontal f
 - sideways in the camera's view: `s = z · (2x − 1) · {{tan_h}}`
 - car frame: `forward = z·cos(Y) − s·sin(Y)`, `right = z·sin(Y) + s·cos(Y)`
 
+### Anchors and horizon (most important for accuracy)
+Our code does the exact ground-plane geometry if you give it pixels. So:
+- `camera_horizons`: for every camera's **KEYFRAME**, the vertical fraction `horizon_y` (0 = top, 1 = bottom) of the true horizon — where the far ground/road would meet the sky, i.e. the vanishing line of the road edges and lane lines. The phone is handheld, so it is usually a little off 0.5. Include the `up` camera (its horizon is low in the frame or below it; estimate it anyway, it may be > 1).
+- `anchor` on every static obstacle that touches the ground and is visible in a keyframe: `{camera, x, y}` = normalized KEYFRAME coordinates of the **ground-contact point nearest the camera** (bottom of a pole, bottom-center of the nearest tire/bumper of a car, bottom of a trunk, foot of a bench or barrier). Pick the camera where that contact point is most clearly visible and closest. Measure carefully — 0.01 in y is a metre at 15 m. Give anchors for **people and moving cars too** (their feet / nearest tire in the KEYFRAME; the server advances them by `velocity` to the end of the clip). Omit `anchor` if the contact point is hidden or the object floats (canopies, wires, signs on poles).
+Still fill `center` with your own best estimate; the server replaces it from the anchor when it can.
+
 Cross-check every distance with scale references: car length ≈ 4.5–4.8 m (SUV/pickup up to 5.5 m), car width ≈ 1.8–2.0 m, car height ≈ 1.45 m (sedan) / 1.75 m (SUV), lane ≈ 3.7 m, parking stall ≈ 2.7 m wide, door ≈ 2 m tall, curb ≈ 0.15 m, street light ≈ 6–9 m, stop sign ≈ 2.1 m to the bottom of the sign. Ground-contact geometry is most reliable within ~25 m; beyond that lean on scale references. If two cameras see the same object, report it once and list both in `seen_in`.
 
 ## What to list

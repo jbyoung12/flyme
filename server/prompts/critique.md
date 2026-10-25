@@ -21,6 +21,8 @@ Compare each FOOTAGE/RENDER pair object by object:
 
 Score each camera 0–100 (100 = every hazard present, each within ~0.5 m and right size; 80 = good enough to fly: all hazards present and none off by more than ~1.5 m; < 50 = hazards missing). Write short, specific `issues` per camera ("street light at left edge missing", "o3 rendered ~3 m too close").
 
+**Positions:** obstacles with `"center_source": "anchor"` were placed by exact ground-plane geometry from an `anchor` (normalized keyframe coords of their ground-contact point) — if one looks misplaced, the anchor pixel was probably wrong: send an `update` with a corrected `anchor` `{camera, x, y}` (bottom contact point nearest the camera, in that camera's FOOTAGE image) rather than a new `center`. For any add or move of a ground-touching static object, include an `anchor` the same way; the server computes `center` from it. Measure carefully: 0.01 in y is about a metre at 15 m.
+
 Emit a **minimal** patch: the few highest-impact fixes, at most ~8 ops, each with `evidence` naming the camera and where in the frame you see it. New obstacles need full fields (type, label, shape, and center/size/heading_deg or radius/height or from/to, seen_in, confidence); leave their `id` empty and one will be assigned. Never change `id`s of existing obstacles.
 
 Set `done: true` only if every camera scores ≥ {{pass_score}} and the patch is empty or cosmetic. This is round {{round}} of at most {{max_rounds}}.

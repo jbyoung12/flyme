@@ -9,7 +9,9 @@ import { CRITIQUE_JSON_SCHEMA } from '../shared/schema.js';
 import { streamInteraction, parseJson, loadPrompt, fill } from './gemini.js';
 import { keyframePath } from './ingest.js';
 import { rigVars } from './reconstruct.js';
-import { writeRun } from './runs.js';
+import { writeRun, readRun } from './runs.js';
+import { anchorObstacle, horizonMap } from './anchors.js';
+import { normalizeObstacle } from '../shared/schema.js';
 
 const DATA_URL = /^data:(image\/[a-z]+);base64,(.+)$/s;
 
@@ -42,6 +44,28 @@ export async function critique({ siteId, round, renders = {}, site, rig }, sse) 
   const c = parseJson(text, 'critique');
   // Drop empty ids on adds so applyPatch assigns the next o<N>.
   for (const op of c.patch ?? []) if (op.op === 'add' && op.obstacle && !op.obstacle.id) delete op.obstacle.id;
+  anchorPatch(c.patch ?? [], site, rig, readRun(siteId, 'clips.json'), sse);
   for (const cam of c.cameras ?? []) sse.log(`${cam.id}: ${cam.match_score}/100${cam.issues?.length ? ` — ${cam.issues.join('; ')}` : ''}`);
   return c;
+}
+
+// Ops that carry an `anchor` get their center from ground-plane geometry
+// instead of the model's estimate (same as reconstruct).
+function anchorPatch(patch, site, rig, clips, sse) {
+  const horizons = horizonMap(site);
+  let n = 0;
+  for (const op of patch) {
+    if (op.op === 'add' && op.obstacle?.anchor) {
+      const o = anchorObstacle(normalizeObstacle(op.obstacle), rig, horizons, clips);
+      if (o.center_source === 'anchor') { op.obstacle = o; n++; }
+    } else if (op.op === 'update' && op.set?.anchor) {
+      const cur = site.obstacles.find((x) => x.id === op.id);
+      if (!cur) continue;
+      const merged = normalizeObstacle({ ...cur, ...op.set, size: { ...cur.size, ...op.set.size } });
+      if (!op.set.size && !cur.size) delete merged.size;
+      const o = anchorObstacle(merged, rig, horizons, clips);
+      if (o.center_source === 'anchor') { op.set = { ...op.set, center: o.center, center_source: 'anchor' }; n++; }
+    }
+  }
+  if (n) sse.log(`ground-anchored ${n} patch ops`);
 }

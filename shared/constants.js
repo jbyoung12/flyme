@@ -93,11 +93,11 @@ export const DEFAULT_PARAMS = {
 // Default camera rig when sites/<id>/rig.json is absent (§6.2).
 export const DEFAULT_RIG = {
   cameras: [
-    { id: 'front', file: 'front.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 0, pitch_deg: 0, hfov_deg: 100 },
-    { id: 'right', file: 'right.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 90, pitch_deg: 0, hfov_deg: 100 },
-    { id: 'back', file: 'back.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 180, pitch_deg: 0, hfov_deg: 100 },
-    { id: 'left', file: 'left.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 270, pitch_deg: 0, hfov_deg: 100 },
-    { id: 'up', file: 'up.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 0, pitch_deg: 60, hfov_deg: 100, optional: true },
+    { id: 'front', file: 'front.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 0, pitch_deg: 0, hfov_deg: 104 },
+    { id: 'right', file: 'right.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 90, pitch_deg: 0, hfov_deg: 104 },
+    { id: 'back', file: 'back.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 180, pitch_deg: 0, hfov_deg: 104 },
+    { id: 'left', file: 'left.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 270, pitch_deg: 0, hfov_deg: 104 },
+    { id: 'up', file: 'up.mov', position: { forward: 0, right: 0, up: 1.3 }, yaw_deg: 0, pitch_deg: 60, hfov_deg: 104, optional: true },
   ],
   aspect: 1.7778,
 };

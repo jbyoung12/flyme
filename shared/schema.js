@@ -271,6 +271,9 @@ const OBSTACLE_PROPS = {
   to: VEC3,
   velocity: VEC2,
   intent_notes: { type: 'string' },
+  // Normalized keyframe coords (0..1, y down) of the ground-contact point
+  // nearest the camera; server/anchors.js turns it into metres.
+  anchor: { type: 'object', properties: { camera: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['camera', 'x', 'y'] },
   seen_in: { type: 'array', items: { type: 'string' } },
   confidence: { type: 'number' },
 };
@@ -299,10 +302,14 @@ export const SITE_JSON_SCHEMA = {
       },
     },
     obstacles: { type: 'array', items: OBSTACLE_JSON_SCHEMA },
+    camera_horizons: {
+      type: 'array',
+      items: { type: 'object', properties: { id: { type: 'string' }, horizon_y: { type: 'number' } }, required: ['id', 'horizon_y'] },
+    },
     scale_refs: { type: 'array', items: { type: 'string' } },
     notes: { type: 'string' },
   },
-  required: ['schema', 'id', 'name', 'surfaces', 'obstacles', 'scale_refs', 'notes'],
+  required: ['schema', 'id', 'name', 'camera_horizons', 'surfaces', 'obstacles', 'scale_refs', 'notes'],
 };
 
 export const CRITIQUE_JSON_SCHEMA = {

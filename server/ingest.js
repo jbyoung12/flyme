@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
-import { SITES_DIR, writeRun } from './runs.js';
+import { SITES_DIR, writeRun, readRun } from './runs.js';
 
 const W = 1280, H = 720; // matches the loop-1 render size
 const PROBE_W = 320, PROBE_H = 180; // sharpness is measured on a small gray frame
@@ -80,8 +80,8 @@ async function ingestCamera(siteId, cam, src) {
     ]);
   }
 
-  let keyframe_t = null;
-  if (!fresh(png, mp4)) {
+  let keyframe_t = readRun(siteId, 'keyframes.json')?.[cam.id] ?? null;
+  if (!fresh(png, mp4) || keyframe_t === null) {
     // Sharpest of 9 frames across the middle ±1 s (phone held still; pick the
     // least motion-blurred one).
     const dur = await durationS(mp4);
@@ -91,6 +91,7 @@ async function ingestCamera(siteId, cam, src) {
     for (const t of ts) scores.push(await sharpness(mp4, t));
     keyframe_t = ts[scores.indexOf(Math.max(...scores))];
     await ffmpeg(['-ss', keyframe_t.toFixed(3), '-i', mp4, '-frames:v', '1', png]);
+    writeRun(siteId, 'keyframes.json', { ...readRun(siteId, 'keyframes.json'), [cam.id]: keyframe_t });
   }
 
   return { id: cam.id, mp4_url: `/media/${siteId}/${cam.id}.mp4`, keyframe_url: `/media/${siteId}/frames/${cam.id}.png`, keyframe_t };
@@ -105,7 +106,10 @@ export async function ingest({ siteId, rig, cameraSource }) {
     });
   if (!jobs.length) throw new Error(`no footage in sites/${siteId}/ (expected front.mov, right.mov, back.mov, left.mov)`);
   const cameras = await Promise.all(jobs.map(({ cam, src }) => ingestCamera(siteId, cam, src)));
-  writeRun(siteId, 'clips.json', await clipTimeline(jobs));
+  const timeline = await clipTimeline(jobs);
+  const kf = readRun(siteId, 'keyframes.json') ?? {};
+  for (const c of timeline.cameras) c.keyframe_t = kf[c.id] ?? null;
+  writeRun(siteId, 'clips.json', timeline);
   return { cameras };
 }
 
