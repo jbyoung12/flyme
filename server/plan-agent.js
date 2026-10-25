@@ -16,7 +16,7 @@ import { planLocal } from './plan-local.js';
 export const AGENT_NAME = 'antigravity-preview-09-2026';
 const ENV_TTL_MS = 12 * 60_000; // Sandbox snapshots after 15 min idle; refresh after 12 min
 const POLL_INTERVAL_MS = 1500;
-const AGENT_TIMEOUT_MS = 180_000;
+const AGENT_TIMEOUT_MS = 600_000; // agent runs take minutes (docs/gemini-api-notes.md §E)
 
 const SHARED_FILES = [
   'constants.js',
@@ -131,12 +131,8 @@ function getWarmEnvId(siteId) {
       return entry.envId;
     }
   }
-  if (siteId) {
-    try {
-      const saved = readRun(siteId, 'env_id')?.trim();
-      if (saved) return saved;
-    } catch { /* ignore */ }
-  }
+  // Never reuse an env id saved by an earlier server process: it may be
+  // snapshotted and hold stale simulator files.
   return null;
 }
 
@@ -310,37 +306,70 @@ export async function planAgent({ siteId, site, target }, sse) {
     }
   };
 
-  await processNewSteps(ix.steps);
-
-  while (['in_progress', 'queued'].includes(ix.status)) {
-    if (Date.now() - tStart > AGENT_TIMEOUT_MS) {
-      try { await client().interactions.cancel(ix.id); } catch { /* ignore */ }
-      throw new Error(`Managed Agent timed out after ${(AGENT_TIMEOUT_MS / 1000).toFixed(0)} s`);
+  // Polling interactions.get returns no steps until the run completes, so
+  // attach to the live event stream: every step.start carries the full step
+  // (code, sim stdout, file writes); thoughts and text arrive as deltas.
+  const steps = [];
+  let thoughtBuf = '';
+  const flushThought = () => { if (thoughtBuf.trim()) sse?.send('thought', { text: thoughtBuf.trim() }); thoughtBuf = ''; };
+  const follow = async (interactionId) => {
+    const stream = await client().interactions.get(interactionId, { stream: true });
+    for await (const ev of stream) {
+      if (Date.now() - tStart > AGENT_TIMEOUT_MS) throw new Error('timeout');
+      if (ev.event_type === 'step.start' && ev.step) {
+        flushThought();
+        steps[ev.index ?? steps.length] = ev.step;
+        await processNewSteps(steps);
+      } else if (ev.event_type === 'step.delta' && ev.delta?.type === 'thought_summary') {
+        thoughtBuf += ev.delta.content?.text ?? '';
+      } else if (ev.event_type === 'step.stop') {
+        flushThought();
+      } else if (ev.event_type === 'error') {
+        throw new Error(ev.error?.message ?? 'agent stream error');
+      }
     }
-    await sleep(POLL_INTERVAL_MS);
-    ix = await client().interactions.get(ix.id);
-    envId = ix.environment_id ?? envId;
-    await processNewSteps(ix.steps);
-
-    // Handle token-budget incomplete status (docs/gemini-api-notes.md §E)
-    if (ix.status === 'incomplete') {
-      sse?.status('Agent hit token step boundary; resuming to finalize result.json');
-      ix = await client().interactions.create(
-        {
-          ...baseConfig,
-          background: true,
-          previous_interaction_id: ix.id,
-          environment: envId,
-          input: [{ type: 'text', text: 'Continue and immediately write /workspace/out/result.json.' }],
-        },
-        { timeout: 90_000 },
-      );
-      if (siteId && ix.id) recordInteraction(siteId, 'plan-agent-continue', ix.id);
-      seenSteps = 0;
+    flushThought();
+  };
+  const finish = async (interactionId) => {
+    try {
+      await follow(interactionId);
+    } catch (err) {
+      if (err.message === 'timeout') {
+        try { await client().interactions.cancel(interactionId); } catch { /* ignore */ }
+        throw new Error(`Managed Agent timed out after ${(AGENT_TIMEOUT_MS / 1000).toFixed(0)} s`);
+      }
+      sse?.log(`agent stream dropped (${err.message}); polling for the result`);
     }
+    let cur = await client().interactions.get(interactionId);
+    while (['in_progress', 'queued'].includes(cur.status)) {
+      if (Date.now() - tStart > AGENT_TIMEOUT_MS) {
+        try { await client().interactions.cancel(interactionId); } catch { /* ignore */ }
+        throw new Error(`Managed Agent timed out after ${(AGENT_TIMEOUT_MS / 1000).toFixed(0)} s`);
+      }
+      await sleep(POLL_INTERVAL_MS);
+      cur = await client().interactions.get(interactionId);
+    }
+    // Catch up on any steps the stream missed (completed runs include all steps).
+    (cur.steps ?? []).forEach((st, i) => { if (!steps[i]) steps[i] = st; });
+    await processNewSteps(steps);
+    return cur;
+  };
+
+  ix = await finish(ix.id);
+  envId = ix.environment_id ?? envId;
+  // Token budget hit → "continue" (docs/gemini-api-notes.md §E).
+  for (let k = 0; k < 2 && ix.status === 'incomplete'; k++) {
+    sse?.status('Agent hit its token budget; resuming to finalize result.json');
+    ix = await client().interactions.create(
+      { ...baseConfig, background: true, previous_interaction_id: ix.id, environment: envId,
+        input: [{ type: 'text', text: 'Continue and immediately write /workspace/out/result.json.' }] },
+      { timeout: 90_000 },
+    );
+    if (siteId && ix.id) recordInteraction(siteId, 'plan-agent-continue', ix.id);
+    steps.length = 0; seenSteps = 0;
+    ix = await finish(ix.id);
   }
 
-  await processNewSteps(ix.steps);
   const totalSec = ((Date.now() - tStart) / 1000).toFixed(1);
   sse?.log(`Managed Agent ${ix.status} in ${totalSec} s`, { interaction_id: ix.id, environment_id: envId, usage: ix.usage });
 
