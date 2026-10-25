@@ -139,8 +139,8 @@ async function runVideoJob(jobId, { siteId, clip, keyframeCam = 'front', site, p
 
     const promptTemplate = loadPrompt('omni.md');
     const carDescriptions = {
-      waymo: 'a white Waymo autonomous Jaguar I-PACE SUV equipped with a spinning black roof LiDAR dome and corner sensor pods',
-      ojai: 'a powder-blue 6th-generation Waymo Ojai autonomous capsule minivan with wrap-around panoramic glass and a roof LiDAR sensor array',
+      car2: 'a white autonomous crossover SUV with a spinning black roof sensor dome and corner sensor pods',
+      car3: 'a powder-blue autonomous capsule minivan with wrap-around glass and a roof sensor ring',
     };
     let basePrompt = fill(promptTemplate, {
       site_name: site?.name || siteId,

@@ -1,7 +1,7 @@
 // Procedural flying cars:
 //   - 'roadster': white wedge coupe
-//   - 'waymo':    white 5th-gen Waymo I-PACE SUV with roof rack, spinning 360° LiDAR dome & 4 corner sensor pods
-//   - 'ojai':     robin's-egg-blue 6th-gen Waymo Ojai (Zeekr) capsule minivan with wrap-around glass & roof sensor halo
+//   - 'car2':    white crossover SUV with roof rack, spinning 360° sensor dome & 4 corner sensor pods
+//   - 'car3':     robin's-egg-blue capsule minivan with wrap-around glass & roof sensor halo
 // All share the 10 perimeter cold-gas nozzles that glow with thrust.
 import * as THREE from 'three';
 import { CAR } from '../shared/constants.js';
@@ -10,18 +10,18 @@ import { extrudeProfile } from './site-meshes.js';
 const ROADSTER_BODY = [[0.5, 0.2], [0.49, 0.3], [0.4, 0.38], [0.12, 0.5], [-0.3, 0.58], [-0.47, 0.6], [-0.5, 0.55], [-0.5, 0.24], [-0.4, 0.18], [0.4, 0.18]];
 const ROADSTER_CANOPY = [[0.16, 0.48], [0.0, 0.88], [-0.12, 0.96], [-0.26, 0.94], [-0.4, 0.57]];
 
-// Waymo 5th-gen (Jaguar I-PACE crossover SUV profile)
-const WAYMO_BODY = [[0.5, 0.22], [0.48, 0.44], [0.34, 0.54], [0.12, 0.56], [-0.44, 0.60], [-0.5, 0.52], [-0.5, 0.24], [-0.38, 0.18], [0.38, 0.18]];
-const WAYMO_CANOPY = [[0.24, 0.52], [0.08, 0.96], [-0.32, 0.98], [-0.44, 0.58]];
+// Car 2: crossover SUV profile
+const CAR2_BODY = [[0.5, 0.22], [0.48, 0.44], [0.34, 0.54], [0.12, 0.56], [-0.44, 0.60], [-0.5, 0.52], [-0.5, 0.24], [-0.38, 0.18], [0.38, 0.18]];
+const CAR2_CANOPY = [[0.24, 0.52], [0.08, 0.96], [-0.32, 0.98], [-0.44, 0.58]];
 
-// Waymo 6th-gen "Ojai" (symmetrical rounded-capsule electric minivan)
-const OJAI_BODY = [[0.49, 0.22], [0.5, 0.48], [0.44, 0.64], [-0.44, 0.64], [-0.5, 0.48], [-0.49, 0.22], [-0.38, 0.18], [0.38, 0.18]];
-const OJAI_CANOPY = [[0.42, 0.60], [0.32, 0.98], [-0.32, 0.98], [-0.42, 0.60]];
+// Car 3: symmetrical rounded-capsule electric minivan
+const CAR3_BODY = [[0.49, 0.22], [0.5, 0.48], [0.44, 0.64], [-0.44, 0.64], [-0.5, 0.48], [-0.49, 0.22], [-0.38, 0.18], [0.38, 0.18]];
+const CAR3_CANOPY = [[0.42, 0.60], [0.32, 0.98], [-0.32, 0.98], [-0.42, 0.60]];
 
 export const CAR_VARIANTS = {
-  roadster: { id: 'roadster', label: 'Roadster', desc: 'a sleek white aerodynamic cold-gas thruster sports coupe' },
-  waymo: { id: 'waymo', label: 'Waymo', desc: 'a white Waymo autonomous Jaguar I-PACE SUV with a spinning black roof LiDAR dome and corner sensor pods' },
-  ojai: { id: 'ojai', label: 'Waymo Ojai', desc: 'a powder-blue 6th-generation Waymo Ojai autonomous capsule minivan with wrap-around glass and a roof LiDAR sensor array' },
+  roadster: { id: 'roadster', label: 'Car 1', desc: 'a sleek white aerodynamic cold-gas thruster sports coupe' },
+  car2: { id: 'car2', label: 'Car 2', desc: 'a white autonomous crossover SUV with a spinning black roof sensor dome and corner sensor pods' },
+  car3: { id: 'car3', label: 'Car 3', desc: 'a powder-blue autonomous capsule minivan with wrap-around glass and a roof sensor ring' },
 };
 
 let glowTex = null;
@@ -115,15 +115,15 @@ function buildBodyVariant(variant) {
   const g = new THREE.Group();
   let spinner = null;
 
-  if (variant === 'waymo') {
+  if (variant === 'car2') {
     const suvH = H * 1.22;
     const paint = new THREE.MeshPhysicalMaterial({ color: '#f6f8fa', roughness: 0.24, metalness: 0.08, clearcoat: 1, clearcoatRoughness: 0.1 });
-    const body = new THREE.Mesh(extrudeProfile(WAYMO_BODY, L, suvH, W, 0.1), paint);
+    const body = new THREE.Mesh(extrudeProfile(CAR2_BODY, L, suvH, W, 0.1), paint);
     body.castShadow = true;
     g.add(body);
 
     const glass = new THREE.MeshPhysicalMaterial({ color: '#162232', roughness: 0.08, metalness: 0.65, transparent: true, opacity: 0.94, clearcoat: 1 });
-    const canopy = new THREE.Mesh(extrudeProfile(WAYMO_CANOPY, L, suvH, W * 0.78, 0.12), glass);
+    const canopy = new THREE.Mesh(extrudeProfile(CAR2_CANOPY, L, suvH, W * 0.78, 0.12), glass);
     g.add(canopy);
 
     const trim = new THREE.MeshStandardMaterial({ color: '#16191f', roughness: 0.55 });
@@ -131,7 +131,7 @@ function buildBodyVariant(variant) {
     skirt.position.y = 0.22;
     g.add(skirt);
 
-    // Waymo teal-blue side badge strip
+    // teal-blue side stripe
     const badgeMat = new THREE.MeshBasicMaterial({ color: '#00bfa5' });
     const badge = new THREE.Mesh(new THREE.BoxGeometry(W + 0.035, 0.035, 0.75), badgeMat);
     badge.position.set(0, 0.58, -0.15);
@@ -163,16 +163,16 @@ function buildBodyVariant(variant) {
     g.add(dome.rig);
     spinner = dome.spinner;
     buildWheels(g, L, W, 0.36);
-  } else if (variant === 'ojai') {
-    // Waymo 6th-gen "Ojai" (Zeekr boxy robin's-egg-blue robotaxi minivan)
+  } else if (variant === 'car3') {
+    // Car 3: boxy robin's-egg-blue minivan
     const vanH = H * 1.32;
     const paint = new THREE.MeshPhysicalMaterial({ color: '#7ab3d4', roughness: 0.25, metalness: 0.12, clearcoat: 1, clearcoatRoughness: 0.12 });
-    const body = new THREE.Mesh(extrudeProfile(OJAI_BODY, L, vanH, W * 1.02, 0.08), paint);
+    const body = new THREE.Mesh(extrudeProfile(CAR3_BODY, L, vanH, W * 1.02, 0.08), paint);
     body.castShadow = true;
     g.add(body);
 
     const glass = new THREE.MeshPhysicalMaterial({ color: '#121b26', roughness: 0.07, metalness: 0.65, transparent: true, opacity: 0.95, clearcoat: 1 });
-    const canopy = new THREE.Mesh(extrudeProfile(OJAI_CANOPY, L, vanH, W * 0.88, 0.1), glass);
+    const canopy = new THREE.Mesh(extrudeProfile(CAR3_CANOPY, L, vanH, W * 0.88, 0.1), glass);
     g.add(canopy);
 
     // Dark lower bumper + sliding door track seam
