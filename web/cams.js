@@ -59,8 +59,14 @@ export function createCams({ tilesEl, modeEl, blendEl, roundEl, lightboxEl }) {
     lightboxId = id;
     const sc = scores[id];
     const op = c.keyframe_url || c.mp4_url ? renderOpacity() : mode === 'footage' ? 0 : 1;
-    lightboxEl.innerHTML = `<div class="frame">${footageHTML(c)}${renders[id] ? `<img class="render" src="${renders[id]}" style="opacity:${op}" alt="" />` : ''}</div>
-      <div class="cap"><b>${esc(id)}</b>${sc ? ` · match ${sc.match_score}/100` : ''} · ${esc(mode)} — tap to close</div>
+    lightboxEl.innerHTML = `<div class="frame">${footageHTML(c)}${renders[id] ? `<img class="render" src="${renders[id]}" style="opacity:${op}" alt="" />` : ''}
+      <div class="seg mini lb-mode">
+        <button data-mode="footage" class="${mode === 'footage' ? 'on' : ''}">Footage</button>
+        <button data-mode="blend" class="${mode === 'blend' ? 'on' : ''}">Blend</button>
+        <button data-mode="render" class="${mode === 'render' ? 'on' : ''}">Render</button>
+      </div>
+    </div>
+      <div class="cap"><b>${esc(id)}</b>${sc ? ` · match ${sc.match_score}/100` : ''} · ${esc(mode)} — tap outside to close</div>
       ${sc?.issues?.length ? `<ul class="cap-issues">${sc.issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}`;
     lightboxEl.hidden = false;
   }
@@ -69,7 +75,16 @@ export function createCams({ tilesEl, modeEl, blendEl, roundEl, lightboxEl }) {
     const tile = e.target.closest('.tile');
     if (tile) openLightbox(tile.dataset.id);
   });
-  lightboxEl.addEventListener('click', () => { lightboxEl.hidden = true; lightboxId = null; });
+  lightboxEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-mode]');
+    if (b) {
+      e.stopPropagation();
+      modeEl.querySelector(`button[data-mode="${b.dataset.mode}"]`)?.click();
+      return;
+    }
+    lightboxEl.hidden = true;
+    lightboxId = null;
+  });
   modeEl.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-mode]');
     if (!b) return;

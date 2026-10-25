@@ -1,0 +1,53 @@
+{
+  "cameras": [
+    {
+      "id": "front",
+      "file": "front.mov",
+      "position": {
+        "forward": 0,
+        "right": 0,
+        "up": 1.3
+      },
+      "yaw_deg": 0,
+      "pitch_deg": 0,
+      "hfov_deg": 104
+    },
+    {
+      "id": "right",
+      "file": "right.mov",
+      "position": {
+        "forward": 0,
+        "right": 0,
+        "up": 1.3
+      },
+      "yaw_deg": 90,
+      "pitch_deg": 0,
+      "hfov_deg": 104
+    },
+    {
+      "id": "back",
+      "file": "back.mov",
+      "position": {
+        "forward": 0,
+        "right": 0,
+        "up": 1.3
+      },
+      "yaw_deg": 180,
+      "pitch_deg": 0,
+      "hfov_deg": 104
+    },
+    {
+      "id": "left",
+      "file": "left.mov",
+      "position": {
+        "forward": 0,
+        "right": 0,
+        "up": 1.3
+      },
+      "yaw_deg": 270,
+      "pitch_deg": 0,
+      "hfov_deg": 104
+    }
+  ],
+  "aspect": 1.7778
+}

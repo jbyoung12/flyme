@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>flyme — System Architecture</title>
+  <style>
+    :root {
+      --bg: #0b0c0e;
+      --panel: #12151c;
+      --border: #252b38;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --purple: #a855f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 36px 24px 64px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 20px;
+      margin-bottom: 28px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 840px;
+    }
+    .badges {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .badge {
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #171b24;
+    }
+    .badge.blue { border-color: #1d4ed8; color: #93c5fd; }
+    .badge.green { border-color: #15803d; color: #86efac; }
+    .badge.purple { border-color: #7e22ce; color: #d8b4fe; }
+
+    h2 {
+      font-size: 18px;
+      margin: 32px 0 14px;
+      color: #e5e7eb;
+      letter-spacing: -0.01em;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .step-tag {
+      font-size: 11px;
+      font-family: monospace;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: #1f2430;
+      color: var(--muted);
+    }
+    .loop-box {
+      border-left: 3px solid var(--blue);
+      padding-left: 14px;
+      margin: 12px 0;
+    }
+    .loop-box.agent {
+      border-left-color: var(--purple);
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px;
+      background: #1a1f2b;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #cbd5e1;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #1e2330;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .svg-wrap {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>flyme — Dual Verification Loop Architecture</h1>
+      <div class="subtitle">
+        Your flying car looks around with its own cameras, rebuilds the street in 3D, checks the rebuild against the footage, and won't hop until a deterministic simulation proves the landing is safe.
+      </div>
+      <div class="badges">
+        <span class="badge blue">Model: gemini-4-argon</span>
+        <span class="badge purple">Managed Agent: antigravity-preview-09-2026 (Node 22 Sandbox)</span>
+        <span class="badge green">Video Synthesis: gemini-omni-1.1-flash</span>
+        <span class="badge">Track: PS2 "More Dimensions" + Managed Agents</span>
+      </div>
+    </header>
+
+    <h2>1. End-to-End Pipeline Diagram</h2>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 310" width="100%" height="310" xmlns="http://www.w3.org/2000/svg" style="font-family:Inter,system-ui,sans-serif">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+          </marker>
+          <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#3b82f6" />
+          </marker>
+          <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#a855f7" />
+          </marker>
+        </defs>
+
+        <!-- Stage A & B -->
+        <rect x="15" y="30" width="210" height="125" rx="10" fill="#161a23" stroke="#2e3646" stroke-width="1.5"/>
+        <text x="28" y="54" fill="#93c5fd" font-size="12" font-weight="700">A &amp; B. INGEST + RECONSTRUCT</text>
+        <text x="28" y="76" fill="#d1d5db" font-size="11">• 4–5 car-cam clips (F/R/B/L/Up)</text>
+        <text x="28" y="94" fill="#d1d5db" font-size="11">• ffmpeg HDR→SDR + keyframes</text>
+        <text x="28" y="112" fill="#d1d5db" font-size="11">• Argon + anchors.js → site.r0.json</text>
+        <text x="28" y="134" fill="#9ca3af" font-size="10" font-family="monospace">POST /api/sites/:id/reconstruct</text>
+
+        <line x1="225" y1="92" x2="265" y2="92" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <!-- Stage C: Loop 1 -->
+        <rect x="270" y="20" width="265" height="165" rx="10" fill="#131c2e" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="284" y="44" fill="#60a5fa" font-size="12" font-weight="700">C. LOOP 1 — RENDER-CRITIQUE-PATCH</text>
+        <text x="284" y="66" fill="#e5e7eb" font-size="11">1. Browser Three.js renders camera</text>
+        <text x="284" y="82" fill="#e5e7eb" font-size="11">   poses w/ ID labels + 5m grid</text>
+        <text x="284" y="102" fill="#e5e7eb" font-size="11">2. Argon compares Render vs. Footage</text>
+        <text x="284" y="122" fill="#e5e7eb" font-size="11">3. Emits match_score + JSON patch[]</text>
+        <text x="284" y="142" fill="#86efac" font-size="11">4. applyPatch + anchorPatch (≤3×)</text>
+        <text x="284" y="166" fill="#93c5fd" font-size="10" font-family="monospace">POST /api/sites/:id/critique</text>
+
+        <line x1="535" y1="92" x2="575" y2="92" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+        <!-- Stage E: Loop 2 -->
+        <rect x="580" y="20" width="285" height="165" rx="10" fill="#1e152a" stroke="#a855f7" stroke-width="1.5"/>
+        <text x="594" y="44" fill="#d8b4fe" font-size="12" font-weight="700">E. LOOP 2 — SIMULATE &amp; JUDGE LOOP</text>
+        <text x="594" y="66" fill="#e5e7eb" font-size="11">• Agent: Node 22 sandbox + sim-cli.mjs</text>
+        <text x="594" y="86" fill="#e5e7eb" font-size="11">• Search: 400-shape pool + Argon judge</text>
+        <text x="594" y="106" fill="#e5e7eb" font-size="11">• Local: Argon 4×3 server loop</text>
+        <text x="594" y="126" fill="#e5e7eb" font-size="11">• 0 SAFE → revise or snap suggestion</text>
+        <text x="594" y="144" fill="#86efac" font-size="11">• ≥1 SAFE → picks best (margins+context)</text>
+        <text x="594" y="166" fill="#d8b4fe" font-size="10" font-family="monospace">POST /api/plan (SSE stream)</text>
+
+        <line x1="865" y1="92" x2="905" y2="92" stroke="#a855f7" stroke-width="2" marker-end="url(#arrow-purple)"/>
+
+        <!-- Stage F & G -->
+        <rect x="910" y="30" width="175" height="125" rx="10" fill="#14211a" stroke="#22c55e" stroke-width="1.5"/>
+        <text x="924" y="54" fill="#86efac" font-size="12" font-weight="700">F &amp; G. CERTIFY &amp; HOP</text>
+        <text x="924" y="76" fill="#e5e7eb" font-size="11">• Server re-simulates</text>
+        <text x="924" y="92" fill="#e5e7eb" font-size="11">  every route (D8)</text>
+        <text x="924" y="112" fill="#e5e7eb" font-size="11">• 3D Chase-Cam HOP</text>
+        <text x="924" y="132" fill="#93c5fd" font-size="11">• Omni 720p MP4</text>
+
+        <!-- Bottom Shared Bar -->
+        <rect x="15" y="215" width="1070" height="75" rx="10" fill="#111318" stroke="#252b38" stroke-dasharray="5,3"/>
+        <text x="32" y="242" fill="#f3f4f6" font-size="12" font-weight="700">ZERO-DEPENDENCY SHARED KERNEL (shared/*.js) — Runs in Browser, Express Server, and Managed Agent Sandbox</text>
+        <text x="32" y="266" fill="#9ca3af" font-size="11" font-family="monospace">constants.js · schema.js · geometry.js (3D SDF) · physics.js (Euler+Drag+VerticalDrop) · checks.js · landable.js · search.js · sim-cli.mjs</text>
+      </svg>
+    </div>
+
+    <h2>2. The Two Self-Correcting Loops</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Loop 1: Ground-Anchored Visual Scene Verification <span class="step-tag">Browser + Gemini 4 Argon</span></h3>
+        <div class="loop-box">
+          <p style="margin:6px 0;font-size:13.5px;color:#d1d5db">
+            Freehand monocular depth from street video is noisy, so Argon outputs normalized ground-contact coordinates (<code>anchor</code>) and horizon lines (<code>camera_horizons</code>), which <code>server/anchors.js</code> projects onto the ground plane via exact pinhole ray geometry.
+          </p>
+          <p style="margin:6px 0;font-size:13.5px;color:#d1d5db">
+            Then <code>web/render-views.js</code> renders the 3D scene from all camera poses with color-coded obstacle solids, floating IDs (<code>o1</code>, <code>o2</code>…), and a <code>5 m</code> metric ground grid. <code>gemini-4-argon</code> inspects each <code>(Footage Keyframe, 3D Render)</code> pair and emits deterministic patch operations until every camera reaches $\ge 80/100$.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Loop 2: Sandbox Simulation &amp; Semantic Choice <span class="step-tag">Managed Agent + Worker Pool</span></h3>
+        <div class="loop-box agent">
+          <p style="margin:6px 0;font-size:13.5px;color:#d1d5db">
+            In <strong>Agent Mode</strong>, the Managed Agent (pre-warmed at SCAN time via <code>client.environments.create({ sources })</code>) proposes 4 diverse routes per round and runs <code>sim-cli.mjs</code> in its Node 22 sandbox. In <strong>Search Mode</strong>, a worker-thread pool evaluates 400 route shapes (including pure vertical-drop descents) and hands the top diverse <code>SAFE</code> arcs to Argon alongside the street keyframes.
+          </p>
+          <p style="margin:6px 0;font-size:13.5px;color:#d1d5db">
+            Our simulator enforces 9 deterministic checks (80 kN total / 40 kN horizontal thrust, 500 m/s cold-gas blowdown, 25 kg reserve, 5 m pedestrian blast radius). Argon weighs street semantics (pedestrian paths, sidewalks, overhead wires) to pick and explain the safest route.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <h2>3. Repository Module Map</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Module</th>
+            <th>Environment</th>
+            <th>Responsibility</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>shared/constants.js</code></td>
+            <td>Universal (0 deps)</td>
+            <td>Vehicle specs, provenance metadata, simulator gains, safety limits, check IDs</td>
+          </tr>
+          <tr>
+            <td><code>shared/schema.js</code></td>
+            <td>Universal (0 deps)</td>
+            <td>Contract validators (§6.3–§6.7), parameter bounds clamp, deterministic <code>applyPatch(site, patch)</code></td>
+          </tr>
+          <tr>
+            <td><code>shared/geometry.js</code></td>
+            <td>Universal (0 deps)</td>
+            <td>Precomputed surface sample grids ($\le 0.25\text{ m}$), 3D box/cylinder/wire SDFs, moving obstacle translation</td>
+          </tr>
+          <tr>
+            <td><code>shared/physics.js</code> &amp; <code>checks.js</code></td>
+            <td>Universal (0 deps)</td>
+            <td>Quintic + Mobius + vertical-drop trajectory, 100 Hz Euler dynamics, thrust clamping, drag, 9 safety checks</td>
+          </tr>
+          <tr>
+            <td><code>shared/landable.js</code> &amp; <code>search.js</code></td>
+            <td>Universal (0 deps)</td>
+            <td>Instant landable-ground footprint map and 400-shape route grid + diversity selector</td>
+          </tr>
+          <tr>
+            <td><code>shared/sim-cli.mjs</code> &amp; <code>plot-svg.js</code></td>
+            <td>Node 22 Sandbox / CLI</td>
+            <td>Single &amp; 4-candidate batch simulator CLI + dual-panel (Side + Top view) SVG trajectory plotter</td>
+          </tr>
+          <tr>
+            <td><code>server/ingest.js</code>, <code>reconstruct.js</code>, <code>anchors.js</code>, <code>critique.js</code></td>
+            <td>Express Server</td>
+            <td>FFmpeg HDR-tonemapped MP4 + keyframe extraction, ground-plane ray ranging, Loop 1 reconstruction &amp; critique SSE</td>
+          </tr>
+          <tr>
+            <td><code>server/plan-agent.js</code>, <code>plan-search.js</code>, <code>plan-local.js</code></td>
+            <td>Express Server</td>
+            <td>Sandbox pre-warming, Managed Agent polling, parallel worker-pool route sweep, target snap suggestion, server re-sim</td>
+          </tr>
+          <tr>
+            <td><code>server/video.js</code> &amp; <code>web/video-panel.js</code></td>
+            <td>Server + Browser</td>
+            <td>Chase-cam WebM capture, FFmpeg H.264 transcode, <code>gemini-omni-1.1-flash</code> photoreal MP4 synthesis</td>
+          </tr>
+          <tr>
+            <td><code>web/main.js</code>, <code>scene.js</code>, <code>render-views.js</code>, <code>panel.js</code></td>
+            <td>Browser (Three.js)</td>
+            <td>In-car touchscreen UI, procedural white car + thruster particles, landable-zone tiles, candidate fan</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

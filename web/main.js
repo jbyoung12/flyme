@@ -12,6 +12,7 @@ import { createPanel } from './panel.js';
 import { renderCameraViews } from './render-views.js';
 import { postSSE, replayEvents, loadMock, HttpError } from './sse.js';
 import { esc, fmt, failReason } from './format.js';
+import { buildSpriteJobs, keyOut, loadGround } from './paint.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -124,7 +125,6 @@ function updateButtons() {
   $('hint').classList.toggle('busy', Boolean(b));
   $('hint').classList.toggle('call', !b && Boolean(S.site) && !S.target);
   $('target-readout').hidden = !S.target || Boolean(b) || S.landed || Boolean(S.result);
-  $('btn-scan').hidden = !S.site || Boolean(b) || S.landed;
   $('btn-newspot').hidden = !S.target || Boolean(b) || (S.result && !S.suggestion && S.result.verdict !== 'SAFE');
   $('btn-replan').hidden = !S.result || Boolean(b) || S.landed || S.result.verdict === 'SAFE';
   const safe = S.result?.verdict === 'SAFE' && Boolean(S.cands.get(S.chosenKey));
@@ -132,7 +132,10 @@ function updateButtons() {
   $('btn-video').disabled = !safe || Boolean(b);
   $('site-picker').disabled = Boolean(b);
   const st = stepStates();
-  for (const li of $('steps').children) li.className = st[li.dataset.step];
+  for (const li of $('steps').children) {
+    li.className = st[li.dataset.step];
+    li.classList.toggle('click', Boolean(stepAction(li.dataset.step)));
+  }
   idleCard();
 }
 const setBusy = (b) => { S.busy = b; updateButtons(); };
@@ -563,6 +566,7 @@ async function showFootage() {
   const ok = look !== 'model' && await scene.setFootage(S.rig, media, S.site?.camera_horizons).catch(() => false);
   const activeLook = ok ? look : 'model';
   scene.setPhoto(Boolean(ok), { look: activeLook });
+  if (ok) ensurePainted();
   const lookEl = $('scene-look');
   if (lookEl) {
     for (const b of lookEl.querySelectorAll('button[data-look]')) {
@@ -571,6 +575,81 @@ async function showFootage() {
     }
   }
 }
+
+// AI world (server/paint.js): image-model ground + object cutouts so the
+// street looks clean from outside views (Above/Side/Top). Generated in the
+// background after footage loads; the "AI world" button flies out to the
+// Above view, and again returns to the original Driver look.
+// Opt-in (?paint=1): the image model doesn't follow the layout closely enough yet.
+const PAINT = params.get('paint') === '1';
+let paintOn = false, paintState = 'off'; // off | busy | ready | failed
+let paintFor = null;
+const paintKey = () => `${S.siteId}|${S.site?.round ?? 0}|${JSON.stringify(S.site?.obstacles ?? []).length}`;
+async function ensurePainted() {
+  if (!PAINT || !S.site || !S.siteId || !S.media.some((m) => m.keyframe_url) || paintFor === paintKey()) return;
+  const key = (paintFor = paintKey());
+  const stale = () => paintFor !== key || paintKey() !== key;
+  setPaintStatus('busy');
+  try {
+    const sprites = await buildSpriteJobs(S.site, S.rig, S.media, S.site.camera_horizons);
+    const ground = scene.capturePaintGuides();
+    panel.log('log', { message: `AI world: painting the ground + ${sprites.length} objects…` });
+    const r = await fetch(`/api/sites/${encodeURIComponent(S.siteId)}/paint`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ground, sprites: sprites.map(({ cam, ...s }) => s) }),
+    });
+    const j = r.ok ? await r.json() : null;
+    if (stale()) return;
+    if (!j) throw new Error(`HTTP ${r.status}`);
+    const [g, cut] = await Promise.all([
+      j.ground?.url ? loadGround(j.ground.url).catch(() => null) : null,
+      Promise.all((j.sprites ?? []).map(async (s) => {
+        const k = s?.url ? await keyOut(s.url).catch(() => null) : null;
+        return k && { id: s.id, ...k };
+      })),
+    ]);
+    if (stale()) return;
+    const ok = cut.filter(Boolean);
+    scene.setPaint({ ground: g, sprites: ok });
+    panel.log('log', { message: `AI world ready: ${g ? 'ground' : 'no ground'}, ${ok.length}/${sprites.length} objects` });
+    setPaintStatus(g || ok.length ? 'ready' : 'failed');
+  } catch (err) {
+    if (paintFor === key) paintFor = null;
+    console.warn('paint failed', err);
+    panel.log('log', { message: `AI world unavailable: ${err.message}` });
+    setPaintStatus('failed');
+  }
+}
+function setPaintStatus(st) {
+  const was = paintState === 'ready' && paintOn;
+  paintState = st;
+  const ready = st === 'ready';
+  if (paintOn && ready && !was && !scene.playing) scene.setView('overview');
+  if (!ready && paintOn) paintOn = st === 'busy';
+  if ((!paintOn || !ready) && scene.view !== 'pov' && !scene.playing) scene.setView('pov');
+  scene.setPaintEnabled(paintOn);
+  for (const b of $('view-controls').querySelectorAll('button[data-outside]')) b.hidden = !(paintOn && ready);
+  const t = $('btn-paint');
+  if (t) {
+    t.hidden = !PAINT;
+    t.classList.toggle('on', paintOn);
+    t.disabled = st === 'off' || st === 'failed';
+    t.textContent = paintOn && st === 'busy' ? 'AI world…' : paintOn ? '✕ AI world' : 'AI world';
+    t.title = st === 'busy' ? 'Painting the street for outside views (~1 min the first time)…'
+      : paintOn ? 'Back to the original Driver view (real footage)' : 'AI world: fly out and see the street from any angle';
+  }
+  syncViewButtons();
+}
+function syncViewButtons() {
+  for (const x of $('view-controls').querySelectorAll('button[data-view]')) x.classList.toggle('on', x.dataset.view === scene.view);
+}
+$('btn-paint')?.addEventListener('click', () => {
+  if (scene.playing) return;
+  paintOn = !paintOn;
+  if (paintOn && paintState === 'ready') scene.setView('overview');
+  setPaintStatus(paintState);
+});
+setPaintStatus('off');
 
 // Ask the server for illustrated frames (cached; ~20 s the first time).
 async function ensureIllustrated() {
@@ -652,7 +731,19 @@ async function loadEval() {
   } catch {}
 }
 
-$('btn-scan').addEventListener('click', scan);
+// Progress steps double as navigation: click one to (re)do that step.
+function stepAction(step) {
+  if (S.busy) return null;
+  if (step === 'scan') return canScan() ? scan : null;
+  if (step === 'pick') return S.site && S.target ? newSpot : null;
+  if (step === 'plan') return canPlan() ? () => plan() : null;
+  if (step === 'hop') return canHop() || S.landed ? hop : null;
+  return null;
+}
+$('steps').addEventListener('click', (e) => {
+  const run = stepAction(e.target.closest('li[data-step]')?.dataset.step);
+  if (run) run();
+});
 $('btn-newspot').addEventListener('click', newSpot);
 $('btn-replan').addEventListener('click', () => plan());
 $('btn-video').addEventListener('click', video);
@@ -678,7 +769,7 @@ document.addEventListener('click', (e) => { if (!e.target.closest('#specs-pop'))
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { toggleSpecs(false); $('lightbox').hidden = true; } });
 $('view-controls').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-view]');
-  if (b && !scene.playing) scene.setView(b.dataset.view);
+  if (b && !scene.playing) { scene.setView(b.dataset.view); syncViewButtons(); }
 });
 $('car-variant')?.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-car]');

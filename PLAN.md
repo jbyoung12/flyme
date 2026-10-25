@@ -398,3 +398,6 @@ Extra routes beyond §6.8: `GET /api/sites/:id` → `{...info, rig, site (latest
 - `docs/gemini-api-notes.md`: verified Interactions API / Managed Agent / Omni snippets.
 - Nothing else is implemented yet.
 - **T0 done (11:40):** `shared/constants.js` (§3/§5), `shared/schema.js` (validators, `clampParams`, `applyPatch`, Gemini JSON schemas), `fixtures/sites/demo-street.json`, `server/index.js` + `server/runs.js` (§6.11), `web/index.html` shell, `scripts/smoke.mjs`, `docs/latency.md`. All deps confirmed at latest.
+
+## AI world (outside views) — added 2026-10-25
+Visual only; the simulator never sees it. `server/paint.js` (`POST /api/sites/:id/paint`) + `web/paint.js`: the image model repaints (1) a top-down render of the projected footage into a clean ground-only overhead photo (±45 m), and (2) each obstacle's crop from its best keyframe into an isolated cutout on a flat key colour; the browser keys it out and stands it up at the reconstructed position (turns to face the viewer; buildings face the rig). Unlocks the Above/Side/Top views. Driver view is unchanged. Opt-in with `?paint=1` (off by default: cutouts and ground were not accurate enough on bike-rack). The "AI world" button flies out to Above and back to the Driver view. Cached by input hash in `sites/<id>/frames/paint/`.

@@ -1,0 +1,9 @@
+node_modules/
+.git/
+.env
+.DS_Store
+videos/
+sites/*/*.mov
+sites/*/*.MOV
+runs/*/render.*.png
+runs/smoke*.json

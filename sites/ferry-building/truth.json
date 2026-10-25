@@ -1,0 +1,6 @@
+{
+  "stride_m": 1.0,
+  "stand_point": "Location 3: inside the Ferry Building nave, facing down the hall toward the round floor emblem; paced 2026-10-25",
+  "near edge of round floor emblem": {"forward": 8, "right": 0},
+  "far edge of round floor emblem": {"forward": 13, "right": 0}
+}

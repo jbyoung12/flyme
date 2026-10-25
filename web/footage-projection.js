@@ -188,6 +188,8 @@ export function createFootageProjection(scene, { bg = '#0b0c0e' } = {}) {
     setOcclusion,
     setPov,
     objMat,
+    ground,
+    backdrop,
     setVisible(on) { group.visible = on; },
     get visible() { return group.visible; },
   };

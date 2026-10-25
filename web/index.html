@@ -48,7 +48,7 @@
       </div>
       <ol id="steps" aria-label="Progress">
         <li data-step="scan"><span class="num">1</span><span class="lbl">Scan street</span></li>
-        <li data-step="pick"><span class="num">2</span><span class="lbl">Pick landing spot</span></li>
+        <li data-step="pick"><span class="num">2</span><span class="lbl">Pick landing</span></li>
         <li data-step="plan"><span class="num">3</span><span class="lbl">Plan flight</span></li>
         <li data-step="hop"><span class="num">4</span><span class="lbl">Fly</span></li>
       </ol>
@@ -77,17 +77,17 @@
           <div class="cams-ctl">
             <div class="seg mini" id="cam-mode">
               <button data-mode="footage" class="on">Footage</button>
-              <button data-mode="render">Render</button>
               <button data-mode="blend">Blend</button>
+              <button data-mode="render">Render</button>
             </div>
-            <input id="blend" type="range" min="0" max="100" value="50" aria-label="Render opacity" title="Render opacity" />
+            <input id="blend" hidden type="range" min="0" max="100" value="50" aria-label="Render opacity" title="Render opacity" />
           </div>
         </div>
       </aside>
 
       <!-- Driver's-seat POV only: the projected footage smears from outside views. -->
-      <div id="view-controls" class="seg mini" title="Camera view" style="display:none">
-        <button data-view="pov" title="Driver's-seat view">Driver</button>
+      <div id="view-controls" class="seg mini" title="Camera view">
+        <button data-view="pov" title="Back to the street-camera view, where the footage lines up">⟲ Recenter</button>
       </div>
 
       <!-- Action dock -->
@@ -98,12 +98,15 @@
           <button id="btn-primary" class="primary-btn"><span class="spin"></span><span class="txt">…</span></button>
         </div>
         <div class="dock-sec">
-          <button id="btn-replay" class="sec-btn" title="Fly the same flight path again">Replay flight</button>
-          <button id="btn-scan" class="sec-btn" title="Scan the street again (S)">Re-scan street</button>
           <button id="btn-newspot" class="sec-btn" title="Clear the landing spot">New spot</button>
           <button id="btn-replan" class="sec-btn" title="Plan again (P)">Plan again</button>
           <button id="btn-video" class="sec-btn" disabled title="Photoreal video of the flight">Photoreal video</button>
         </div>
+      </div>
+      <div id="scene-look" class="seg mini" title="Street view mode">
+        <button data-look="photo" class="on">Footage</button>
+        <button data-look="blend">Blend</button>
+        <button data-look="model">Render</button>
       </div>
       <div id="lightbox" hidden></div>
     </main>

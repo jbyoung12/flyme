@@ -76,6 +76,9 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border-radius: 5px; border: 
 #steps li.done + li::before { background: rgba(47, 210, 122, 0.45); }
 #steps li.warn { color: #ffd38a; }
 #steps li.warn .num { background: rgba(255, 176, 32, 0.15); border-color: var(--amber); color: var(--amber); }
+#steps li.click { cursor: pointer; }
+#steps li.click:hover { color: var(--text); }
+#steps li.click:hover .num { border-color: var(--blue); }
 
 .tb-btn { height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 0 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--dim); font-weight: 600; font-size: 13.5px; white-space: nowrap; }
 .tb-btn svg { width: 17px; height: 17px; }
@@ -109,6 +112,7 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border-radius: 5px; border: 
 #view { grid-area: view; position: relative; overflow: hidden; background: radial-gradient(120% 90% at 50% 10%, #13161b 0%, var(--bg) 60%); touch-action: none; }
 #view canvas { display: block; width: 100%; height: 100%; outline: none; cursor: crosshair; }
 #view-controls { position: absolute; z-index: 3; right: 14px; top: 12px; background: var(--glass); backdrop-filter: blur(10px); }
+#scene-look { position: absolute; z-index: 4; right: 14px; bottom: 14px; background: var(--glass); backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
 
 /* camera drawer */
 #cams { position: absolute; z-index: 3; left: 14px; top: 12px; width: clamp(180px, 15vw, 232px); max-height: calc(100% - 24px); display: flex; flex-direction: column; background: var(--glass); backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
@@ -188,6 +192,7 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border-radius: 5px; border: 
 #lightbox { position: absolute; inset: 0; background: rgba(5, 6, 7, 0.94); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 20 !important; cursor: zoom-out; padding: 24px; }
 #lightbox .frame { position: relative; width: 100%; max-width: 1280px; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
 #lightbox .frame > .footage, #lightbox .frame > .render, #lightbox .frame > .nofeed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+#lightbox .lb-mode { position: absolute; right: 14px; bottom: 14px; z-index: 2; background: var(--glass); backdrop-filter: blur(10px); }
 #lightbox .cap { color: var(--dim); }
 #lightbox .cap-issues { margin: 0; padding: 0 0 0 18px; max-width: 900px; color: var(--dim); font-size: 13px; }
 
