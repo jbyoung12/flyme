@@ -27,7 +27,7 @@ export function runPath(siteId, name) {
 
 export function writeRun(siteId, name, data) {
   const p = runPath(siteId, name);
-  fs.writeFileSync(p, typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+  fs.writeFileSync(p, typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data, null, 2));
   return p;
 }
 

@@ -159,7 +159,7 @@ app.post('/api/sites/:id/critique', async (req, res) => {
   if (!critique) return;
   const { renders, site: inSite } = req.body ?? {};
   await stream(req, res, { stage: 'critique', siteId: id, eventsName: `critique.r${round}.events.jsonl` }, async (sse) => {
-    const site = normalizeSite(inSite ?? latestSite(id));
+    const site = normalizeSite({ ...(inSite ?? latestSite(id)), id });
     const c = await critique({ siteId: id, round, renders, site, rig: readRig(id) }, sse);
     const v = validateCritique(c);
     if (!v.ok) throw new Error(`critique failed validation: ${v.errors.join('; ')}`);
