@@ -5,7 +5,7 @@
 // ?mock=1 (or any 501 from a track route) replays web/mock/*.json instead.
 import { DEFAULT_RIG, PROVENANCE, MAX_CRITIQUE_ROUNDS, MAX_PLAN_ROUNDS, CAR } from '../shared/constants.js';
 import { normalizeSite, applyPatch } from '../shared/schema.js';
-import { landableMap } from '../shared/landable.js';
+import { landableMap, MAX_HOP_RANGE_M } from '../shared/landable.js';
 import { createScene } from './scene.js';
 import { createCams } from './cams.js';
 import { createPanel } from './panel.js';
@@ -698,6 +698,14 @@ function setTarget(t) {
 function onTap(t) {
   if (S.busy || !S.site) return;
   if (S.rounds.length || S.result || S.landed || S.planError) resetPlan();
+  // The car can only hop ~35 m on its air (shared/landable.js); say so now.
+  const d = Math.hypot(t.forward, t.right);
+  if (d > MAX_HOP_RANGE_M) {
+    setTarget(null);
+    status(`That spot is ${fmt(d, 0)} m away — the car can hop about ${MAX_HOP_RANGE_M} m. Tap somewhere closer (green = clear ground).`);
+    return;
+  }
+  status('');
   setTarget(t);
 }
 
