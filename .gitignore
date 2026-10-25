@@ -1,0 +1,9 @@
+node_modules/
+.env
+dist/
+sites/*/*.mov
+sites/*/*.MOV
+sites/*/*.mp4
+sites/*/frames/
+runs/
+.DS_Store

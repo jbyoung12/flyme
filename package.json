@@ -1,0 +1,22 @@
+{
+  "name": "flyme",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Flying-car hop planner: Gemini 4 Argon reconstructs the site from the car's cameras, plans a thruster hop, and verifies it in a render/simulate/critique loop.",
+  "scripts": {
+    "dev": "node server/index.js",
+    "test": "node --test shared/"
+  },
+  "dependencies": {
+    "@google/genai": "^2.31.0",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "ffmpeg-static": "^5.3.0",
+    "multer": "^2.5.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  }
+}
