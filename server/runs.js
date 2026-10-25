@@ -13,16 +13,17 @@ export const FIXTURES_DIR = path.join(ROOT, 'fixtures', 'sites');
 
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
 
-export function runDir(siteId) {
+// Reads pass create = false so browsing sites never litters runs/.
+export function runDir(siteId, create = true) {
   if (!SAFE_NAME.test(siteId)) throw new Error(`bad site id "${siteId}"`);
   const dir = path.join(RUNS_DIR, siteId);
-  fs.mkdirSync(dir, { recursive: true });
+  if (create) fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-export function runPath(siteId, name) {
+export function runPath(siteId, name, create = true) {
   if (!SAFE_NAME.test(name)) throw new Error(`bad run file name "${name}"`);
-  return path.join(runDir(siteId), name);
+  return path.join(runDir(siteId, create), name);
 }
 
 export function writeRun(siteId, name, data) {
@@ -32,7 +33,7 @@ export function writeRun(siteId, name, data) {
 }
 
 export function readRun(siteId, name) {
-  const p = runPath(siteId, name);
+  const p = runPath(siteId, name, false);
   if (!fs.existsSync(p)) return null;
   const text = fs.readFileSync(p, 'utf8');
   return name.endsWith('.json') ? JSON.parse(text) : text;
@@ -41,7 +42,8 @@ export function readRun(siteId, name) {
 // Latest file in runs/<siteId>/ matching a regex (by name sort; names embed
 // round numbers or timestamps so lexical order = chronological).
 export function latestRun(siteId, re) {
-  const dir = runDir(siteId);
+  const dir = runDir(siteId, false);
+  if (!fs.existsSync(dir)) return null;
   const names = fs.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   return names.at(-1) ?? null;
 }

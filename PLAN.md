@@ -283,6 +283,9 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 | `resolve.js` (Claude) | `resolveDestination({site, text})` | `{target, explanation}` |
 
 **Plan stream payloads (T4 emits, T2 consumes):** one `attempt` event per candidate as the server re-sim finishes it: `data = {round, id, label, params, sim}` where `sim` is the full §6.5 SimResult **with `samples`** (server's own sim, not the agent's claim) plus `agent_claim: {sim_verdict, failures}` and `disagrees: bool`. Optional `thought`/`tool`/`log` events in between. Final `plan` event `data` = §6.7 result where every `rounds[].candidates[]` also carries `sim` (same as its attempt) and the top level carries `disagreements: [{id, agent, server}]`; `verdict` is recomputed from the server sim (a chosen candidate the server rates UNSAFE → `REJECT`).
+**Event field names:** `thought` → `{text}`; `tool` → `{code}` (the command/code run, plus optional `name`); `log`/`status` → `{message}`; `sim_result` → §6.5 summary.
+**VIDEO hook (T5a):** `web/video-panel.js` exports `openVideoPanel({siteId, site, plan, chosen, recordHop, log})` (or default export); the UI's VIDEO button dynamic-imports it. `recordHop()` resolves to a webm Blob of the chosen hop.
+**Eval (T5b):** `runs/eval.json` top level (or under `summary`): `first_try_safe_pct`, `after_loop_safe_pct` (0–100), `recon_error_m: [before, after]`. `GET /api/eval` returns `{}` until it exists.
 **Critique payload:** final `critique` event `data` = §6.6 + `{round, patch_log}`; followed by `site` event with the patched site (`site.round = round`).
 
 Extra routes beyond §6.8: `GET /api/sites/:id` → `{...info, rig, site (latest), camera_media}`, `POST /api/plan/prewarm {site_id}`, `GET /api/runs/:id/:name`. Static: `/media/<id>/…` (mp4/png only, never `.mov`), `/fixtures/…`. Shared JSON schemas for `response_format`: `SITE_JSON_SCHEMA`, `CRITIQUE_JSON_SCHEMA`, `PARAMS_JSON_SCHEMA` in `shared/schema.js`.

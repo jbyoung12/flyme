@@ -218,7 +218,7 @@ app.post('/api/resolve-destination', async (req, res) => {
 
 app.get('/api/eval', (req, res) => {
   const p = path.join(RUNS_DIR, 'eval.json');
-  if (!fs.existsSync(p)) return res.status(404).json({ error: 'no runs/eval.json yet' });
+  if (!fs.existsSync(p)) return res.json({}); // UI hides the footer until eval runs
   res.type('json').send(fs.readFileSync(p, 'utf8'));
 });
 

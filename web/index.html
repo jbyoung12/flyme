@@ -4,35 +4,81 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>flyme</title>
-  <style>
-    /* T0 shell layout only; T2 owns the look (PLAN.md §8). */
-    :root { --bg: #0b0c0e; --panel: #14161a; --line: #23262d; --text: #e7e9ee; --dim: #8a909c; }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-      font: 15px/1.4 Inter, system-ui, -apple-system, sans-serif; }
-    #app { display: grid; height: 100vh; grid-template-columns: 260px 1fr 340px; grid-template-rows: 1fr 72px;
-      grid-template-areas: "cams view panel" "bar bar bar"; }
-    #cams { grid-area: cams; border-right: 1px solid var(--line); overflow: auto; padding: 12px; }
-    #view { grid-area: view; position: relative; overflow: hidden; }
-    #panel { grid-area: panel; border-left: 1px solid var(--line); overflow: auto; padding: 12px; }
-    #bar { grid-area: bar; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--panel); }
-    #bar button, #bar select { font: inherit; color: var(--text); background: #1d2026; border: 1px solid var(--line); border-radius: 10px; padding: 12px 20px; }
-    .dim { color: var(--dim); }
-  </style>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="app">
-    <aside id="cams"><div class="dim">Cameras</div></aside>
-    <main id="view"></main>
-    <aside id="panel"><div class="dim">Plan</div></aside>
+    <!-- Left: camera strip (cams.js) -->
+    <aside id="cams">
+      <div class="strip-head">
+        <span class="eyebrow">Cameras</span>
+        <span id="recon-round" class="pill dim">Reconstruction —</span>
+      </div>
+      <div class="seg" id="cam-mode">
+        <button data-mode="footage">Footage</button>
+        <button data-mode="render">Render</button>
+        <button data-mode="blend" class="on">Blend</button>
+      </div>
+      <label class="slider"><span class="dim">Render opacity</span><input id="blend" type="range" min="0" max="100" value="50" /></label>
+      <div id="tiles"></div>
+    </aside>
+
+    <!-- Center: 3D view (scene.js) -->
+    <main id="view">
+      <div id="hud-top">
+        <div id="site-name">—</div>
+        <div id="pills"></div>
+      </div>
+      <div id="hint">Tap the ground to choose a landing spot</div>
+      <div id="target-readout" hidden></div>
+      <div id="view-controls">
+        <button data-view="overview" title="Overview">Overview</button>
+        <button data-view="top" title="Top view">Top</button>
+        <button data-view="side" title="Side view">Side</button>
+      </div>
+      <div id="lightbox" hidden></div>
+    </main>
+
+    <!-- Right: plan panel (panel.js) -->
+    <aside id="panel">
+      <div id="plan-banner" class="banner idle">Tap a landing spot, then PLAN</div>
+      <div id="valid-banner" class="valid" hidden>Plan valid ~10 s — rescan before HOP</div>
+      <section id="arc">
+        <div id="verdict" class="verdict none">No route selected</div>
+        <div id="arc-title" class="dim"></div>
+        <ul id="checklist"></ul>
+        <div id="air"></div>
+      </section>
+      <section id="rounds-wrap">
+        <div class="eyebrow">Rounds</div>
+        <div id="rounds"><div class="dim small">Each round the agent proposes 4 routes; our simulator checks all 4.</div></div>
+      </section>
+      <section id="log-wrap">
+        <div class="eyebrow">Agent log</div>
+        <div id="log"></div>
+      </section>
+    </aside>
+
+    <!-- Bottom bar (main.js) -->
     <footer id="bar">
-      <select id="site-picker"></select>
-      <button id="btn-scan">SCAN</button>
-      <button id="btn-plan">PLAN</button>
-      <button id="btn-hop">HOP</button>
-      <span id="status" class="dim"></span>
+      <select id="site-picker" aria-label="Site"></select>
+      <button id="btn-scan" class="big">SCAN</button>
+      <button id="btn-plan" class="big primary">PLAN</button>
+      <button id="btn-hop" class="big hop" disabled>HOP</button>
+      <button id="btn-video" class="big ghost" disabled title="Photoreal video (stretch)">VIDEO</button>
+      <div class="seg small-seg" id="plan-mode" title="Planner">
+        <button data-mode="agent" class="on">Agent</button>
+        <button data-mode="local">Local</button>
+      </div>
+      <button id="btn-replay" class="toggle" title="Replay cached runs">Replay</button>
+      <button id="btn-specs" class="toggle" title="Vehicle specs">ⓘ Specs</button>
+      <div id="status" class="dim"></div>
+      <div id="eval-stat" hidden></div>
     </footer>
   </div>
+
+  <div id="specs-pop" hidden></div>
   <script type="module" src="/main.js"></script>
 </body>
 </html>
