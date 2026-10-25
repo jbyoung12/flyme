@@ -124,6 +124,7 @@ app.get('/api/sites/:id', (req, res) => {
     mp4_url: fs.existsSync(path.join(dir, `${c.id}.mp4`)) ? `/media/${id}/${c.id}.mp4` : null,
     keyframe_url: fs.existsSync(path.join(dir, 'frames', `${c.id}.png`)) ? `/media/${id}/frames/${c.id}.png` : null,
     illustrated_url: fs.existsSync(path.join(dir, 'frames', `${c.id}.illustrated.png`)) ? `/media/${id}/frames/${c.id}.illustrated.png` : null,
+    keyframe_hi_url: fs.existsSync(path.join(dir, 'frames', `${c.id}.hi.jpg`)) ? `/media/${id}/frames/${c.id}.hi.jpg` : null,
   }));
   res.json({ ...info, rig: readRig(id), site: latestSite(id), camera_media: cameras });
 });

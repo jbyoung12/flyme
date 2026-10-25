@@ -9,6 +9,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { SITES_DIR, writeRun, readRun } from './runs.js';
 
 const W = 1280, H = 720; // matches the loop-1 render size
+const HI_W = 1920, HI_H = 1080; // 3D-view keyframe (hiKeyframe)
 const PROBE_W = 320, PROBE_H = 180; // sharpness is measured on a small gray frame
 
 function ffmpeg(args) {
@@ -72,7 +73,7 @@ async function ingestCamera(siteId, cam, src) {
   const png = path.join(dir, 'frames', `${cam.id}.png`);
   let keyframe_t = readRun(siteId, 'keyframes.json')?.[cam.id] ?? null;
   if (!src && fs.existsSync(mp4) && fs.existsSync(png)) {
-    return { id: cam.id, mp4_url: `/media/${siteId}/${cam.id}.mp4`, keyframe_url: `/media/${siteId}/frames/${cam.id}.png`, keyframe_t };
+    return cameraMedia(siteId, cam.id, keyframe_t);
   }
   fs.mkdirSync(path.dirname(png), { recursive: true });
 
@@ -97,7 +98,44 @@ async function ingestCamera(siteId, cam, src) {
     writeRun(siteId, 'keyframes.json', { ...readRun(siteId, 'keyframes.json'), [cam.id]: keyframe_t });
   }
 
-  return { id: cam.id, mp4_url: `/media/${siteId}/${cam.id}.mp4`, keyframe_url: `/media/${siteId}/frames/${cam.id}.png`, keyframe_t };
+  if (keyframe_t !== null) await hiKeyframe(siteId, cam, src, keyframe_t);
+  return cameraMedia(siteId, cam.id, keyframe_t);
+}
+
+const cameraMedia = (siteId, camId, keyframe_t) => ({
+  id: camId, mp4_url: `/media/${siteId}/${camId}.mp4`, keyframe_url: `/media/${siteId}/frames/${camId}.png`,
+  keyframe_hi_url: fs.existsSync(hiKeyframePath(siteId, camId)) ? `/media/${siteId}/frames/${camId}.hi.jpg` : null, keyframe_t,
+});
+
+// Full-resolution keyframe for the 3D view only: same instant as the 720p
+// keyframe, straight from the source clip (no second compression), same
+// tonemap and same aspect/padding so the projection geometry is unchanged.
+// Loop-1 critique keeps using the 720p PNG (it matches the render size).
+export async function hiKeyframe(siteId, cam, src, keyframe_t) {
+  const out = hiKeyframePath(siteId, cam.id);
+  if (!src || fresh(out, src)) return out;
+  const tone = (await isHdr(src)) ? `${TONEMAP},` : '';
+  const fit = (w, h, flags = '') => `scale=${w}:${h}:force_original_aspect_ratio=decrease${flags},pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`;
+  // The 30 fps re-encode can land a frame or two off the source's own
+  // timing: pick the source frame within ±0.1 s that best matches the 720p
+  // keyframe (PSNR), so horizons and the projection still line up.
+  let best = { t: keyframe_t, psnr: -Infinity };
+  const png = keyframePath(siteId, cam.id);
+  if (fs.existsSync(png)) {
+    for (let k = -6; k <= 6; k++) {
+      const t = Math.max(0, keyframe_t + k / 60);
+      const { stderr } = await ffmpeg(['-ss', t.toFixed(3), '-i', src, '-i', png, '-frames:v', '1',
+        '-filter_complex', `[0]${tone}${fit(W, H)}[a];[a][1]psnr`, '-f', 'null', '-']).catch((e) => ({ stderr: String(e) }));
+      const psnr = Number(/average:([\d.]+)/.exec(stderr)?.[1]);
+      if (psnr > best.psnr) best = { t, psnr };
+    }
+  }
+  await ffmpeg([
+    '-y', '-ss', best.t.toFixed(3), '-i', src, '-frames:v', '1',
+    '-vf', `${tone}${fit(HI_W, HI_H, ':flags=lanczos')},unsharp=5:5:0.5`,
+    '-q:v', '2', out,
+  ]);
+  return out;
 }
 
 export async function ingest({ siteId, rig, cameraSource }) {
@@ -142,3 +180,4 @@ async function clipTimeline(jobs) {
 // Paths for downstream stages.
 export function mp4Path(siteId, camId) { return path.join(SITES_DIR, siteId, `${camId}.mp4`); }
 export function keyframePath(siteId, camId) { return path.join(SITES_DIR, siteId, 'frames', `${camId}.png`); }
+export function hiKeyframePath(siteId, camId) { return path.join(SITES_DIR, siteId, 'frames', `${camId}.hi.jpg`); }
