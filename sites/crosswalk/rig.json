@@ -47,18 +47,6 @@
       "yaw_deg": 270,
       "pitch_deg": 0,
       "hfov_deg": 104
-    },
-    {
-      "id": "up",
-      "file": "up.mov",
-      "position": {
-        "forward": 0,
-        "right": 0,
-        "up": 1.3
-      },
-      "yaw_deg": 0,
-      "pitch_deg": 30,
-      "hfov_deg": 104
     }
   ],
   "aspect": 1.7778

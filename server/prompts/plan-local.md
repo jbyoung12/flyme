@@ -40,7 +40,22 @@ Each candidate specifies:
 - `climb_bias` ∈ `[0.25, 0.75]`: fraction of flight time when peak height is reached.
   - `0.34–0.40` climbs early (great for clearing a parked vehicle in front of the starting spot).
   - `0.45–0.50` is a symmetric arc.
-- `horizontal_delay` ∈ `[0, 0.4]`: fraction of flight spent rising vertically before accelerating forward (`0.08–0.15` helps clear close obstacles in front of the car).
+- `horizontal_delay` ∈ `[0, 0.4]`: fraction of flight spent rising vertically before accelerating forward (`0.08–0.15` helps clear close obstacles in front of the car, while `0–0.04` minimizes horizontal thrust and saves 15–25 kg of air on longer hops).
+
+### How to Fix Specific Simulator Failures Across Rounds
+- **`air_reserve` failed (`remaining_kg < 25`):**
+  1. **Shorten `duration_s`** (e.g., to `2.9–3.4 s` — hovering burns ~40 kg/s of air!).
+  2. **Lower `apex_height_m`** (e.g., `2.5–4.0 m` and bow laterally around tall obstacles or fly *under* overhead wires/canopies instead of climbing `7–9 m` over them).
+  3. **Set `horizontal_delay: 0` or `0.02`** and **`climb_bias: 0.44–0.48`** (smooths peak acceleration and saves 20–35 kg of air).
+  4. **Reduce `|side_bow_m|`** unless lateral detour is strictly needed for obstacle clearance.
+- **`collision` / `clearance` failed (`< 0.5 m`):**
+  - Look at the `obstacle_id`, its `center`/`size`/`height`, and time `t` of closest approach:
+  - If it's a low obstacle (`height <= 2.5 m`, like a parked car, bike dock, sign, or barrier), **increase `apex_height_m` to `4.5–6.0 m`** or shift peak earlier/later with `climb_bias` (`0.33` for early obstacles, `0.55` for late obstacles).
+  - If it's a tall/overhead obstacle (pole, tree canopy, transit shelter, or wire), **go around it laterally with `side_bow_m`** (`-4` to `-10` for left detour, `+4` to `+10` for right detour) while keeping `apex_height_m` moderate (`2.5–4.0 m`) to stay under wires/canopies.
+- **`pedestrian` failed (`< 5.0 m` horizontal):**
+  - Shift `side_bow_m` away from the pedestrian's side (`+` bows right, `-` bows left). Remember moving pedestrians translate by `velocity * t`!
+- **`thrust_limit` or `touchdown_horizontal` / `touchdown_vertical` failed:**
+  - The trajectory demanded > 40 kN horizontal or > 80 kN total thrust. **Increase `duration_s` by `0.3–0.5 s`**, set **`horizontal_delay: 0`**, keep **`climb_bias` near `0.45`**, and lower extreme `apex_height_m` or `side_bow_m`.
 
 ## 4. Current Street Scene (`site.json`)
 ```json

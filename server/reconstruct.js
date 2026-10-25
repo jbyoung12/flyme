@@ -31,12 +31,14 @@ export function rigVars(rig, cams = rig.cameras) {
   };
 }
 
-function timelineText(siteId) {
-  const tl = readRun(siteId, 'clips.json');
-  if (!tl?.cameras?.[0]?.start_t && tl?.cameras?.[0]?.start_t !== 0) return 'Recording order unknown; treat clips as roughly simultaneous.';
-  return 'Recording order (t in seconds; t = 0 is the end of the most recent clip = "now"):\n' +
-    tl.cameras.map((c) => `- \`${c.id}\`: t = ${c.start_t} … ${c.end_t}`).join('\n') +
-    '\nThe scene is the same in every clip, but people and cars move between clips: the same person may appear in two clips at different places. Report each real object once.';
+// Clips are treated as simultaneous, like a real car's cameras (D22). The one
+// exception is front vs up: both look forward but were filmed at different
+// times, so the same person can appear in both at different positions.
+function timelineText(cams) {
+  const base = 'Treat all clips as filmed at the same moment ("now"), like the simultaneous cameras of a real car.';
+  return cams.some((c) => c.id === 'up')
+    ? `${base} Exception: \`front\` and \`up\` both look forward and were filmed at different times, so the same person or car may appear in both at different positions — report each real object once, using its position in the \`front\` clip.`
+    : base;
 }
 
 export function ingestedCameras(siteId, rig) {
@@ -58,7 +60,7 @@ export async function reconstruct({ siteId, rig }, sse) {
       input.push({ type: 'image', data: fs.readFileSync(keyframePath(siteId, c.id)).toString('base64'), mime_type: 'image/png' });
     }
   });
-  input.push({ type: 'text', text: fill(loadPrompt('reconstruct.md'), { ...rigVars(rig, cams), site_id: siteId, timeline: timelineText(siteId) }) });
+  input.push({ type: 'text', text: fill(loadPrompt('reconstruct.md'), { ...rigVars(rig, cams), site_id: siteId, timeline: timelineText(cams) }) });
 
   sse.status('Argon is reconstructing the street');
   const { text } = await streamInteraction({

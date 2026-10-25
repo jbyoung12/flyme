@@ -42,8 +42,13 @@ To save you a tool call, here are the exact contents of `/workspace/input/site.j
   - `duration_s`: `1.0` to `8.0` (sweet spot for 15–30 m hop is `3.3–3.8 s`)
   - `side_bow_m`: `-15` to `15` (`0` = straight, `< 0` = left bow, `> 0` = right bow)
   - `climb_bias`: `0.25` to `0.75` (`0.35` climbs early before obstacles; `0.5` symmetric)
-  - `horizontal_delay`: `0` to `0.4` (`0.10–0.15` rises vertically before moving forward)
-- Hint for Round 1 diversity: include (a) a low direct hop (`apex_height_m: 1.8`) or fast hop to test the direct path, (b) a climb-first road-lane arc (`apex_height_m: 5.5, duration_s: 3.5, side_bow_m: 0, climb_bias: 0.35, horizontal_delay: 0.12`), (c) a lateral bow (`side_bow_m: -2.0` or `2.0`, `apex_height_m: 5.8, duration_s: 3.6, climb_bias: 0.35, horizontal_delay: 0.12`), and (d) a higher/longer glide.
+  - `horizontal_delay`: `0` to `0.4` (`0.10–0.15` rises vertically before moving forward; `0–0.03` saves 15–25 kg of air on longer hops)
+- Hint for Round 1 diversity: include (a) a low direct hop (`apex_height_m: 1.8`) or fast hop to test the direct path, (b) a climb-first road-lane arc (`apex_height_m: 5.5, duration_s: 3.5, side_bow_m: 0, climb_bias: 0.35, horizontal_delay: 0.12`), (c) a lateral bow (`side_bow_m: -2.0` or `2.0`, `apex_height_m: 5.8, duration_s: 3.6, climb_bias: 0.35, horizontal_delay: 0.12`), and (d) a compact air-efficient arc (`duration_s: 3.1, apex_height_m: 3.5, climb_bias: 0.45, horizontal_delay: 0`).
+- **How to revise when checks fail:**
+  - If `air_reserve` fails (`remaining_kg < 25`): shorten `duration_s` to `2.9–3.4 s`, lower `apex_height_m` to `2.5–4.2 m` (bow around tall obstacles or fly under wires instead of climbing 8 m over them), set `horizontal_delay: 0`, and set `climb_bias: 0.44–0.48`.
+  - If `collision`/`clearance` fails on a low obstacle (`height <= 2.5 m`): raise `apex_height_m` (`4.8–6.2 m`) or shift `climb_bias` (`0.34` if early, `0.55` if late).
+  - If `collision`/`clearance` fails on a tall/overhead obstacle (canopy, shelter, pole, wire): detour laterally with `side_bow_m` (`-4..-10` left or `+4..+10` right) and stay low (`apex_height_m: 2.5–3.8 m`).
+  - If `thrust_limit` or `touchdown_*` fails: set `horizontal_delay: 0`, `climb_bias: 0.45`, and reduce extreme `apex_height_m` or `side_bow_m`.
 
 ## 4. Fast Execution Protocol (Minimize Tool Calls!)
 - **Do NOT call `view_file` or `cat` on `/workspace/flyme/*.js` or `/workspace/input/*.json`** — all input files and the exact `validateAgentResult` schema are already provided right here in this prompt.
