@@ -270,7 +270,7 @@ export function createScene(container, { onTap } = {}) {
     if (!ok.length) return;
     const size = map.step_m * 0.9;
     const geo = new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: '#2fd27a', transparent: true, opacity: 0.16, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: '#2fd27a', transparent: true, opacity: 0.09, depthWrite: false });
     zoneMesh = new THREE.InstancedMesh(geo, mat, ok.length);
     const m = new THREE.Matrix4();
     ok.forEach((c, i) => { m.makeTranslation(c.right, 0.02, -c.forward); zoneMesh.setMatrixAt(i, m); });
