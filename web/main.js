@@ -72,7 +72,7 @@ function primaryAction() {
   if (S.busy === 'plan') return { label: 'Planning flight…', busy: true };
   if (S.busy === 'hop') return { label: 'Flying…', busy: true };
   if (!S.site) return { label: 'Scan this street', run: scan, kind: 'go' };
-  if (S.landed) return { label: 'Pick a new spot', run: newSpot, kind: 'neutral' };
+  if (S.landed) return { label: 'Replay flight', run: hop, kind: 'go' };
   if (canHop()) return { label: 'Fly!', run: hop, kind: 'hop' };
   if (S.result) return S.suggestion ? { ...S.suggestion, kind: 'suggest' } : { label: 'Pick another spot', run: newSpot, kind: 'neutral' };
   if (!S.target) return { label: 'Tap the ground where you want to land', disabled: true };
@@ -124,9 +124,8 @@ function updateButtons() {
   $('hint').classList.toggle('busy', Boolean(b));
   $('hint').classList.toggle('call', !b && Boolean(S.site) && !S.target);
   $('target-readout').hidden = !S.target || Boolean(b) || S.landed || Boolean(S.result);
-  $('btn-replay').hidden = !S.landed || Boolean(b);
-  $('btn-scan').hidden = !S.site || Boolean(b);
-  $('btn-newspot').hidden = !S.target || Boolean(b) || (S.result && !S.suggestion && S.result.verdict !== 'SAFE') || S.landed;
+  $('btn-scan').hidden = !S.site || Boolean(b) || S.landed;
+  $('btn-newspot').hidden = !S.target || Boolean(b) || (S.result && !S.suggestion && S.result.verdict !== 'SAFE');
   $('btn-replan').hidden = !S.result || Boolean(b) || S.landed || S.result.verdict === 'SAFE';
   const safe = S.result?.verdict === 'SAFE' && Boolean(S.cands.get(S.chosenKey));
   $('btn-video').hidden = !VIDEO || !safe || Boolean(b);
@@ -553,16 +552,24 @@ async function video() {
 // frame, projected), 'photo' (raw footage projected) or 'model'.
 // Default Photo: raw footage is pixel-aligned with the rebuild (the illustrated
 // redraw shifts things, so outlines drift). ?look= is a hidden override.
-const LOOK = ['illustrated', 'photo', 'model'].includes(params.get('look')) ? params.get('look') : 'photo';
+let LOOK = ['illustrated', 'photo', 'blend', 'model'].includes(params.get('look')) ? params.get('look') : 'photo';
 async function showFootage() {
   const hasIllus = S.media.some((m) => m.illustrated_url);
   const hasPhoto = S.media.some((m) => m.keyframe_url);
   let look = LOOK;
   if (look === 'illustrated' && !hasIllus) look = hasPhoto ? 'photo' : 'model';
-  if (look === 'photo' && !hasPhoto) look = 'model';
+  if ((look === 'photo' || look === 'blend') && !hasPhoto) look = 'model';
   const media = S.media.map((m) => ({ id: m.id, keyframe_url: look === 'illustrated' ? m.illustrated_url : m.keyframe_url }));
   const ok = look !== 'model' && await scene.setFootage(S.rig, media, S.site?.camera_horizons).catch(() => false);
-  scene.setPhoto(Boolean(ok), { look });
+  const activeLook = ok ? look : 'model';
+  scene.setPhoto(Boolean(ok), { look: activeLook });
+  const lookEl = $('scene-look');
+  if (lookEl) {
+    for (const b of lookEl.querySelectorAll('button[data-look]')) {
+      b.classList.toggle('on', b.dataset.look === activeLook);
+      b.disabled = b.dataset.look !== 'model' && !hasPhoto;
+    }
+  }
 }
 
 // Ask the server for illustrated frames (cached; ~20 s the first time).
@@ -645,7 +652,6 @@ async function loadEval() {
   } catch {}
 }
 
-$('btn-replay').addEventListener('click', hop);
 $('btn-scan').addEventListener('click', scan);
 $('btn-newspot').addEventListener('click', newSpot);
 $('btn-replan').addEventListener('click', () => plan());
@@ -681,20 +687,28 @@ $('car-variant')?.addEventListener('click', (e) => {
   for (const x of $('car-variant').querySelectorAll('button')) x.classList.toggle('on', x === b);
   for (const x of $('view-controls').querySelectorAll('button')) x.classList.toggle('on', x.dataset.view === scene.view);
 });
-// Keyboard shortcuts for the stage: S scan, P plan, H hop.
+$('scene-look')?.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-look]');
+  if (!b || b.disabled) return;
+  LOOK = b.dataset.look;
+  showFootage();
+});
+// Keyboard shortcuts for the stage: S scan, P plan, H hop, R recenter.
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey) return;
   const k = e.key.toLowerCase();
   if (k === 's' && canScan()) scan();
   if (k === 'p' && canPlan()) plan();
   if (k === 'h' && canHop()) hop();
+  if (k === 'r' && !scene.playing) scene.setView('pov');
 });
 
 renderSpecs();
 pills();
 updateButtons();
 await initSites();
-loadEval();
+// Footer eval stat removed: scripts/eval.mjs matched objects by scan-specific ids
+// and fell back to hard-coded numbers, so the figures were not trustworthy.
 // Deep-link a target: ?target=25,0
 if (params.get('target')) {
   const [f, r] = params.get('target').split(',').map(Number);
