@@ -10,7 +10,7 @@
 - **Track:** Problem Statement 2, "More Dimensions" — *"Build a system that renders what it made, watches the result, critiques it against the goal, and fixes it in a loop."* Also targeting **Best use of Managed Agents ($5k)**.
 - **Judging:** working live demo w/ real verification loop **50%** · problem & usefulness 25% · originality / only-possible-with-Argon 15% · pitch clarity 10%.
 - **Rules that bite:** repo **public**; demo must show only what was built today; no assets we lack rights to (→ **no Tesla logos/trademarks**, generic white car); submission includes a **1-minute demo video**; team members added on the submission page.
-- **Team:** the user (films footage, tests merges in browser, owns pitch) + Claude (integrator + subagents per track) + optionally Antigravity on low-coupling tracks (§9).
+- **Team:** the user (films footage, measures ground truth, tests merges in browser, owns pitch) + **Claude** (T0 contracts/shell, T2 Three.js UI, T3 ingest + Loop 1 critique, T5b eval/NL destination, main integrator) + **Antigravity** (T1 physics + CLI, T4 Managed Agent Loop 2, T5a Omni video, T5c docs) (§9).
 
 ## 1. Product
 
@@ -43,7 +43,7 @@
 | D16 | Specs | §3, labeled public vs. estimate in UI. |
 | D17 | Ground truth | **L-shaped pacing** from the stand point (forward steps, then 90° turn and sideways steps), stride calibrated with iPhone Measure (§13). No Google Maps. Never sent to the model. |
 | D18 | Repo | `github.com/jbyoung12/flyme`, **public now**. Raw footage & `.env` gitignored. |
-| D19 | Parallelism | Track 0 (contracts) serial first, then Tracks 1–4 parallel as Claude subagents in git worktrees; Antigravity may take 5a/5c (§9). |
+| D19 | Parallelism | **Tight-Seam Split (§9):** Track 0 (contracts) serial first, then disjoint parallel tracks: **Claude** owns T2 (UI) + T3 (Loop 1 pipeline) + T5b + integration; **Antigravity** owns T1 (Physics/CLI) + T4 (Managed Agent Loop 2) + T5a (Omni) + T5c (Docs). |
 | D20 | Moving objects | **Required in v1.** Argon estimates each moving person/car's position at the **last frame of its clip** + velocity (m/s, car frame) + intent notes (reverse lights, heading to crosswalk). Sim moves them at constant velocity during the flight; agent judges intent the sim can't. |
 | D21 | Air resistance / wind | Simple quadratic **drag in the sim** (effect < 1%, shown if asked). **Wind not modeled** — covered by the 0.5 m clearance margin. |
 | D22 | "Now" | Flight `t = 0` = end of the clips (latest footage). Clips are sequential (not simultaneous like a real car's cameras) — accepted for the demo. UI shows **"plan valid ~10 s — rescan before HOP"**. |
@@ -189,7 +189,7 @@ Bounds (clamp + report if violated): apex 0.5–20 · duration 1–8 · side_bow
 
 ### 6.5 Simulator API
 - JS: `simulate(site, params, opts?) → SimResult` in `shared/physics.js`; `runChecks(site, simTrace) → checks[]` in `shared/checks.js`.
-- CLI (used by the agent): `node sim-cli.mjs --site site.json --params params.json [--out result.json] [--svg plot.svg]` → prints **summary** JSON (no samples) to stdout; exit 0 always. `--svg` writes a top view + side view plot (text SVG the agent can read).
+- CLI (used by the agent): `node sim-cli.mjs --site site.json --params params.json [--out result.json] [--svg plot.svg]` → prints **summary** JSON (no samples) to stdout; exit 0 always. `params.json` may be a single §6.4 object or an array/batch of 4 candidates `[{id, label, params}]` so the agent can evaluate a whole round in one tool call. `--svg` writes a top view + side view plot (text SVG the agent can read; plots all candidates when given a batch).
 ```json
 {
   "schema": "flyme.sim/1",
@@ -199,7 +199,7 @@ Bounds (clamp + report if violated): apex 0.5–20 · duration 1–8 · side_bow
   "checks": [ {"id": "clearance", "pass": false, "value": 0.21, "limit": 0.5, "unit": "m", "t": 1.12, "obstacle_id": "o1", "message": "0.21 m from parked white SUV at t=1.12 s"} ],
   "touchdown": {"t": 3.21, "forward": 23.6, "right": -2.9, "v_vertical": 1.4, "v_horizontal": 0.3, "miss_m": 0.41},
   "air": {"start_kg": 250, "used_kg": 141.2, "remaining_kg": 108.8},
-  "peak": {"thrust_kN": 74.1, "up_m": 5.0},
+  "peak": {"thrust_kN": 74.1, "up_m": 5.0, "drag_N": 182.4},
   "samples": [ {"t": 0, "forward": 0, "right": 0, "up": 0, "thrust_kN": 20.6, "air_kg": 250, "clearance_m": 0.9} ]
 }
 ```
@@ -290,27 +290,29 @@ Each `data:` line is JSON: `{ "type", "stage", "t_ms", "data" }`.
 
 ## 9. Tracks, ownership, acceptance
 
-Branches `track/<n>-<name>`, Claude subagents with `isolation: "worktree"`; the integrator (main Claude session) merges to `main`. **File ownership is exclusive** to avoid conflicts.
+**Tight-Seam Split:** Branches `track/<n>-<name>` (or isolated worktrees); **file ownership is strictly disjoint** across Claude and Antigravity so neither steps on the other's files.
+- **T1 ↔ T4 seam (Antigravity):** T4 runs T1's `sim-cli.mjs` inside the Managed Agent sandbox, so Antigravity owns both (`shared/{physics,checks,geometry,sim-cli,plot-svg,*.test}.*` and `server/plan-{agent,local}.js`).
+- **T2 ↔ T3 seam (Claude):** T2 (`renderCameraViews`) and T3 (`reconstruct` + `critique`) form Loop 1, so Claude owns both (`web/**` and `server/{ingest,gemini,reconstruct,critique}.js`) plus T0 (`server/index.js`, `shared/{constants,schema}.js`, fixtures) and merges to `main`.
 
 | Track | Owner | Files | Acceptance |
 |---|---|---|---|
-| **0. Contracts** (serial, first, ~20 min) | Integrator | `shared/constants.js` (rewrite from §3), `shared/schema.js` (validators for §6.3/6.4/6.6/6.7 + bounds clamp + deterministic `applyPatch(site, patch)`), `fixtures/sites/demo-street.json` (hand-made: parked car between start and a target ~25 m ahead, a pole, a wire, a pedestrian >5 m from origin), `server/index.js` (Express 5 + Vite middleware — avoid `*` wildcards, mounts track routers, SSE helper, cache helper), `web/index.html` shell, `CLAUDE.md` | `npm run dev` serves a page; `GET /api/sites` works; smoke test: one `gemini-4-argon` call + one Antigravity hello (record env provisioning time & total latency in `docs/latency.md`) |
-| **1. Physics** | Claude subagent | `shared/physics.js`, `shared/checks.js`, `shared/geometry.js`, `shared/sim-cli.mjs`, `shared/plot-svg.js`, `shared/*.test.js` | `npm test` green; fixture: direct low hop clips the parked car (UNSAFE: collision/clearance), climb-early hop SAFE, ~45 m hop fails air, pedestrian walking into the landing zone fails `pedestrian`, drag changes touchdown point by < 1%; deterministic; runs on Node 22 with zero deps; < 50 ms per sim |
-| **2. In-car UI** | Claude subagent | `web/**` (except shell from T0), `web/mock/*.json` | Works fully on mock SSE + fixture; tap target; playback of mocked attempts; `renderCameraViews` returns 5 PNGs; looks like §8 |
-| **3. Gemini pipeline** | Claude subagent | `server/ingest.js`, `server/gemini.js` (client, upload+poll, SSE adapters), `server/reconstruct.js`, `server/critique.js`, `server/prompts/reconstruct.md`, `server/prompts/critique.md` | On a real site folder: ingest produces mp4s + keyframes; reconstruct returns schema-valid site.json; critique round returns schema-valid patch; everything cached in `runs/` and replayable |
-| **4. Agent loop** | Claude subagent | `server/plan-agent.js`, `server/plan-local.js`, `server/prompts/plan-agent.md`, `server/prompts/plan-local.md` | With fixture site + target: agent run streams steps, downloads result.json, server re-sim agrees; local fallback finds SAFE plan in ≤5 iterations; env pre-warm function exported for SCAN |
-| **5a. Omni video** (stretch) | **Antigravity OK** | `server/video.js`, `server/prompts/omni.md`, `web/video-panel.js` | POST a ≤10 s webm + keyframe → mp4 URL playable in UI |
-| **5b. NL destination + eval** (stretch) | Claude | `server/resolve.js`, `scripts/eval.mjs` | "land by the tree" → target; `runs/eval.json` with first-try vs after-loop pass rates over ≥10 targets/site |
-| **5c. Docs** | **Antigravity OK** | `README.md`, `docs/architecture.html` | README: what/why, architecture, specs table w/ provenance, how to run, **"built today" section**, credits |
+| **0. Contracts** (serial, first, ~20 min) | **Claude** (Integrator) | `shared/constants.js` (rewrite from §3), `shared/schema.js` (validators for §6.3/6.4/6.6/6.7 + bounds clamp + deterministic `applyPatch(site, patch)`), `fixtures/sites/demo-street.json` (hand-made: parked car between start and a target ~25 m ahead, a pole, a wire, a pedestrian >5 m from origin), `server/index.js` (Express 5 + Vite middleware — avoid `*` wildcards, mounts track routers, SSE helper, cache helper), `web/index.html` shell, `CLAUDE.md` | `npm run dev` serves a page; `GET /api/sites` works; smoke test: one `gemini-4-argon` call + one Antigravity hello (record env provisioning time & total latency in `docs/latency.md`) |
+| **1. Physics** | **Antigravity** | `shared/physics.js`, `shared/checks.js`, `shared/geometry.js`, `shared/sim-cli.mjs`, `shared/plot-svg.js`, `shared/*.test.js` | `npm test` green; fixture: direct low hop clips the parked car (UNSAFE: collision/clearance), climb-early hop SAFE, ~45 m hop fails air, pedestrian walking into the landing zone fails `pedestrian`, drag changes touchdown point by < 1%; deterministic; runs on Node 22 with zero deps; < 50 ms per sim |
+| **2. In-car UI** | **Claude** (subagent) | `web/**` (except shell from T0 and `web/video-panel.js`), `web/mock/*.json` | Works fully on mock SSE + fixture; tap target; playback of mocked attempts; `renderCameraViews` returns 5 PNGs; looks like §8 |
+| **3. Gemini pipeline** | **Claude** (subagent) | `server/ingest.js`, `server/gemini.js` (client, upload+poll, SSE adapters), `server/reconstruct.js`, `server/critique.js`, `server/prompts/reconstruct.md`, `server/prompts/critique.md` | On a real site folder: ingest produces mp4s + keyframes; reconstruct returns schema-valid site.json; critique round returns schema-valid patch; everything cached in `runs/` and replayable |
+| **4. Agent loop** | **Antigravity** | `server/plan-agent.js`, `server/plan-local.js`, `server/prompts/plan-agent.md`, `server/prompts/plan-local.md` | With fixture site + target: agent run streams steps, downloads result.json, server re-sim agrees; local fallback finds SAFE plan in ≤3 rounds (4 candidates/round); env pre-warm function exported for SCAN |
+| **5a. Omni video** (stretch) | **Antigravity** | `server/video.js`, `server/prompts/omni.md`, `web/video-panel.js` | POST a ≤10 s webm + keyframe → mp4 URL playable in UI |
+| **5b. NL destination + eval** (stretch) | **Claude** | `server/resolve.js`, `scripts/eval.mjs` | "land by the tree" → target; `runs/eval.json` with first-try vs after-loop pass rates over ≥10 targets/site |
+| **5c. Docs** | **Antigravity** | `README.md`, `docs/architecture.html` | README: what/why, architecture, specs table w/ provenance, how to run, **"built today" section**, credits |
 
-**Dependencies:** T1–T4 start once T0 is merged. T4 needs T1's CLI → T4 builds against the contract with a stub until T1 lands. T2 needs nothing but fixtures. T3 needs real clips (user films during T0/T1).
+**Dependencies:** T1–T4 start once T0 is merged. Antigravity builds T1 + T4 together against T1's real `sim-cli.mjs` (zero stub drift). T2 needs nothing but fixtures. T3 needs real clips (user films during T0/T1).
 
 ## 10. Timeline (PT)
 
 | Time | Work |
 |---|---|
-| 10:55–11:20 | T0 contracts + public repo + API/agent smoke test & latency. **User films** (§13). |
-| 11:20–13:15 | T1–T4 in parallel. User measures ground truth, writes `truth.json` notes, copies clips into `sites/`. Antigravity on 5a (optional). |
+| 10:55–11:35 | T0 contracts + public repo + API/agent smoke test & latency. **User films** (§13). |
+| 11:35–13:15 | **Parallel build:** Claude on **T2 + T3**; Antigravity on **T1 + T4** (then **T5a/T5c**). User measures ground truth, writes `truth.json` notes, copies clips into `sites/`. |
 | 13:00 | Lunch (integrator keeps merging) |
 | 13:15–13:45 | **Merge 1:** footage → site → loop 1 → tap → loop 2 → playback, end to end |
 | 13:45–15:00 | Tune prompts on real footage; second site; 5a/5b |
@@ -350,7 +352,7 @@ Branches `track/<n>-<name>`, Claude subagents with `isolation: "worktree"`; the 
 
 | Risk | Mitigation |
 |---|---|
-| Agent latency too long for stage | Pre-warm env at SCAN; cap ≤6 sim runs; stream steps so the wait is the show; if > ~90 s in smoke test → demo uses `mode: "local"` live and agent runs the eval batch (still counts for Managed Agents) |
+| Agent latency too long for stage | Pre-warm env at SCAN; batch all 4 candidates per round in one `sim-cli` call (≤3 rounds); stream steps so the wait is the show; if > ~90 s in smoke test → demo uses `mode: "local"` live and agent runs the eval batch (still counts for Managed Agents) |
 | Distances off from monocular video | Scale refs in prompt; loop 1 corrects; tolerant thresholds |
 | `.mov` / HEVC issues | Always transcode to H.264 mp4 |
 | Argon key lacks credits (not free tier) | Smoke test at T0; ask Google mentors |
