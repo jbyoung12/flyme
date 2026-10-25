@@ -8,7 +8,8 @@
     "dev": "node --watch server/index.js",
     "start": "node server/index.js",
     "test": "node --test shared/",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "eval": "node scripts/eval.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.31.0",

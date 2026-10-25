@@ -16,7 +16,7 @@ import { DEFAULT_RIG, CRITIQUE_PASS_SCORE, MAX_CRITIQUE_ROUNDS } from '../shared
 import { validateSite, normalizeSite, validateCritique, applyPatch } from '../shared/schema.js';
 import {
   ROOT, SITES_DIR, FIXTURES_DIR, RUNS_DIR,
-  openSSE, replaySSE, isReplay, writeRun, readRun, latestRun, latestSite,
+  openSSE, replaySSE, isReplay, writeRun, readRun, latestRun, bestPlanReplay, latestSite,
 } from './runs.js';
 
 const PORT = Number(process.env.PORT ?? 5173);
@@ -179,14 +179,14 @@ app.post('/api/sites/:id/critique', async (req, res) => {
 app.post('/api/plan', async (req, res) => {
   const { site_id: siteId, site: inSite, target, mode = 'agent' } = req.body ?? {};
   if (!SITE_ID.test(siteId ?? '')) return res.status(400).json({ error: 'site_id required' });
-  if (isReplay(req)) return replaySSE(res, siteId, latestRun(siteId, /^plan-\d+\.events\.jsonl$/));
+  if (isReplay(req)) return replaySSE(res, siteId, bestPlanReplay(siteId, target));
   const [modName, fn] = { local: ['plan-local', 'planLocal'], search: ['plan-search', 'planSearch'] }[mode] ?? ['plan-agent', 'planAgent'];
   const plan = await need(res, modName, fn);
   if (!plan) return;
   const ts = Date.now();
   await stream(req, res, { stage: 'plan', siteId, eventsName: `plan-${ts}.events.jsonl` }, async (sse) => {
     const site = normalizeSite(inSite ?? latestSite(siteId));
-    const result = await plan({ siteId, site, target, ts }, sse);
+    const result = await plan({ siteId, site, target, ts, rig: readRig(siteId), wait_s: Number(req.body?.wait_s) || 0 }, sse);
     writeRun(siteId, `plan-${ts}.result.json`, result);
     sse.send('plan', result);
   });

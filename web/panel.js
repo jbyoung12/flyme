@@ -40,7 +40,7 @@ export function createPanel({ bannerEl, validEl, verdictEl, titleEl, checklistEl
     const disagree = c.disagrees
       ? `<div class="note disagree">Agent claimed ${esc(c.agent_claim?.sim_verdict ?? '?')}; our simulator says ${esc(sim.verdict)} — the simulator wins.</div>`
       : '';
-    titleEl.innerHTML = `<b>${esc(c.id)}</b> · ${esc(c.label ?? '')}<br><span class="small">apex ${fmt(p.apex_height_m, 1)} m · ${fmt(p.duration_s, 1)} s · bow ${fmt(p.side_bow_m, 1)} m · climb ${fmt(p.climb_bias, 2)}</span>${disagree}`;
+    titleEl.innerHTML = `<b>${esc(c.id)}</b> · ${esc(c.label ?? '')}<br><span class="small">apex ${fmt(p.apex_height_m, 1)} m · ${fmt(p.duration_s, 1)} s · bow ${fmt(p.side_bow_m, 1)} m · climb ${fmt(p.climb_bias, 2)}${p.vertical_drop ? ` · drop ${fmt(p.vertical_drop, 2)}` : ''}</span>${disagree}`;
     checklistEl.innerHTML = CHECKS.map((k) => {
       const ch = sim.checks?.find((x) => x.id === k.id);
       const cls = !ch ? 'na' : ch.pass ? 'pass' : 'fail';

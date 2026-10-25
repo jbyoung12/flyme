@@ -346,6 +346,11 @@ function finalizePlan(result) {
       b.hidden = false;
       b.textContent = `Land ${fmt(sug.offset_m, 1)} m away instead? (${fmt(sug.forward, 1)}, ${fmt(sug.right, 1)}) → PLAN`;
       b.onclick = () => { b.hidden = true; setTarget({ forward: sug.forward, right: sug.right }); plan(); };
+    } else if (result.suggested_wait_s) {
+      const b = $('suggest');
+      b.hidden = false;
+      b.textContent = `Wait ${result.suggested_wait_s} s for people to clear, then hop → PLAN`;
+      b.onclick = () => { b.hidden = true; plan({ wait_s: result.suggested_wait_s }); };
     }
     const lr = lastRound?.candidates?.[0];
     if (lr) select(lr.key);
@@ -355,7 +360,7 @@ function finalizePlan(result) {
   updateButtons();
 }
 
-async function plan() {
+async function plan({ wait_s = 0 } = {}) {
   if (!S.site) return;
   if (!S.target) {
     const h = $('hint');
@@ -366,14 +371,14 @@ async function plan() {
   resetPlan();
   $('suggest').hidden = true;
   setBusy('plan');
-  panel.log('log', { message: `— PLAN → ${fmt(S.target.forward, 1)} m ahead, ${fmt(S.target.right, 1)} m right (${S.mode}) —` });
+  panel.log('log', { message: `— PLAN → ${fmt(Math.abs(S.target.forward), 1)} m ${S.target.forward < 0 ? 'behind' : 'ahead'}, ${fmt(Math.abs(S.target.right), 1)} m ${S.target.right < 0 ? 'left' : 'right'} (${S.mode}) —` });
   panel.banner('busy', `Planning — round 1/${MAX_PLAN_ROUNDS}`, ({ agent: 'Managed Agent running our simulator in its sandbox', search: 'Simulator searching 400 routes · Argon judging them against the footage' })[S.mode] ?? 'Local planner + our simulator');
   status('Planning…');
   const mock = S.target.forward > 35 ? 'plan-reject' : 'plan';
   try {
     const { events } = await runStage({
       url: '/api/plan',
-      body: { site_id: S.siteId, site: S.site, target: S.target, mode: S.mode },
+      body: { site_id: S.siteId, site: S.site, target: S.target, mode: S.mode, wait_s },
       mock,
       onEvent: onPlanEvent,
       onMockData: (data) => {
@@ -436,7 +441,7 @@ function setTarget(t) {
   scene.setTarget(t);
   const el = $('target-readout');
   el.hidden = !t;
-  if (t) el.innerHTML = `Landing spot <b>${fmt(t.forward, 1)} m</b> ahead · <b>${fmt(Math.abs(t.right), 1)} m</b> ${t.right < 0 ? 'left' : 'right'}`;
+  if (t) el.innerHTML = `Landing spot <b>${fmt(Math.abs(t.forward), 1)} m</b> ${t.forward < 0 ? 'behind' : 'ahead'} · <b>${fmt(Math.abs(t.right), 1)} m</b> ${t.right < 0 ? 'left' : 'right'}`;
   $('hint').hidden = Boolean(t);
 }
 
@@ -474,7 +479,7 @@ async function loadEval() {
 }
 
 $('btn-scan').addEventListener('click', scan);
-$('btn-plan').addEventListener('click', plan);
+$('btn-plan').addEventListener('click', () => plan());
 $('btn-hop').addEventListener('click', hop);
 $('btn-video').addEventListener('click', video);
 $('site-picker').addEventListener('change', (e) => loadSite(e.target.value));

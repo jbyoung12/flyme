@@ -6,11 +6,11 @@
 // target is *suggested* (never applied silently). Output = §6.7 + §6.11.
 
 import fs from 'node:fs';
-import { diverseSafe } from '../shared/search.js';
+import { diverseSafe, shapeGrid } from '../shared/search.js';
 import { landableMap } from '../shared/landable.js';
-import { clampParams } from '../shared/schema.js';
+import { clampParams, validateAgentResult } from '../shared/schema.js';
 import { prepareObstacles, carToObstacleClearance3D, carToPersonHorizontalDistance2D } from '../shared/geometry.js';
-import { searchRoutesParallel, simulateMany, reachCells } from './search-pool.js';
+import { searchRoutesParallel, simulateMany, reachCells, refineSafe } from './search-pool.js';
 import { streamInteraction, parseJson, loadPrompt, fill } from './gemini.js';
 import { keyframePath } from './ingest.js';
 import { DEFAULT_RIG } from '../shared/constants.js';
@@ -89,10 +89,9 @@ const JUDGE_SCHEMA = {
   required: ['decision', 'chosen_id', 'why', 'revised', 'semantic_notes'],
 };
 
-async function judge({ siteId, site, target, cards, round, mustPick }, sse) {
+async function judge({ siteId, site, target, rig = DEFAULT_RIG, cards, round, mustPick }, sse) {
   const input = [];
-  const rig = DEFAULT_RIG;
-  for (const c of rig.cameras) {
+  for (const c of rig.cameras ?? DEFAULT_RIG.cameras) {
     const kp = keyframePath(siteId, c.id);
     if (!fs.existsSync(kp)) continue;
     input.push({ type: 'text', text: `Camera \`${c.id}\` (yaw ${c.yaw_deg}°: looking ${['forward', 'right', 'back', 'left'][Math.round(c.yaw_deg / 90) % 4]}) — footage keyframe:` });
@@ -132,6 +131,28 @@ async function suggestNearby(site, target, sse) {
   return ok[0] ?? null;
 }
 
+// ---------------------------------------------------------------- wait
+
+// Everyone moving keeps moving: the site as it will be `wait` seconds from now.
+export function siteAfter(site, wait) {
+  if (!wait) return site;
+  return { ...site, obstacles: site.obstacles.map((o) => o.velocity
+    ? { ...o, center: { forward: +(o.center.forward + o.velocity.forward * wait).toFixed(2), right: +(o.center.right + o.velocity.right * wait).toFixed(2) } }
+    : o) };
+}
+
+// People/cars are what block the hop → find the shortest departure delay
+// (2–20 s) after which some route is SAFE.
+async function suggestWait(site, target, sse) {
+  const shapes = shapeGrid({ full: false });
+  sse.status('people are in the way — checking whether waiting a few seconds clears the route');
+  for (let wait = 2; wait <= 20; wait += 2) {
+    const res = await simulateMany(siteAfter(site, wait), shapes.map((sh) => ({ target, ...sh })));
+    if (res.some((e) => e.sim.verdict === 'SAFE')) return wait;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- main
 
 function sendAttempt(sse, round, id, label, e) {
@@ -142,25 +163,48 @@ function roundCandidate(id, label, e) {
   return { id, label, params: e.params, sim_verdict: e.sim.verdict, failures: e.sim.failures, margins: e.margins, sim: e.sim };
 }
 
-export async function planSearch({ siteId, site, target }, sse) {
+export async function planSearch({ siteId, site: siteNow, target, rig = DEFAULT_RIG, wait_s: waitS = 0 }, sse) {
+  const site = siteAfter(siteNow, waitS);
+  if (waitS) sse.log(`planning for departure in ${waitS} s: moving people and cars advanced by their velocity`);
   sse.status('simulator: searching 400 route shapes to the landing spot');
   const t0 = Date.now();
   const found = await searchRoutesParallel(site, target);
   sse.log(`simulator: ${found.safe.length} of ${found.tried} route shapes are SAFE (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+  if (found.safe.length) {
+    const before = Math.max(...found.safe.map((e) => e.margins.min_clearance_m));
+    found.safe = await refineSafe(site, found.safe);
+    const after = Math.max(...found.safe.map((e) => e.margins.min_clearance_m));
+    sse.log(`simulator: refined to ${found.safe.length} SAFE routes · best clearance ${before.toFixed(2)} → ${after.toFixed(2)} m`);
+  }
 
   if (!found.safe.length) {
     // Show the 4 least-bad routes so the user sees why, and suggest a nearby spot.
     const show = found.near.slice(0, 4);
     const cands = show.map((e, i) => { const id = `r1${ROUND_IDS[i]}`; const label = labelFor(e.params); sendAttempt(sse, 1, id, label, e); return roundCandidate(id, label, e); });
-    const suggestion = await suggestNearby(site, target, sse);
-    const reasons = [...new Set(show.flatMap((e) => e.sim.checks.filter((c) => !c.pass).map((c) => c.message)))].slice(0, 3);
-    const reject_reason = `No safe route to (${target.forward}, ${target.right}) in ${found.tried} route shapes. Closest attempts: ${reasons.join('; ')}.` +
-      (suggestion ? ` A safe landing exists ${suggestion.offset_m} m away at (${suggestion.forward}, ${suggestion.right}).` : '');
+    const blockedByMovers = show.some((e) => e.sim.checks.some((c) => !c.pass && c.obstacle_id && site.obstacles.find((o) => o.id === c.obstacle_id)?.velocity));
+    const [suggestion, wait] = await Promise.all([
+      suggestNearby(site, target, sse),
+      blockedByMovers && waitS < 20 ? suggestWait(site, target, sse) : null,
+    ]);
+    // Name everyone inside the keep-out on the best attempt, not just the closest.
+    const prepared = prepareObstacles(site);
+    const best = show[0].sim;
+    const tooClose = site.obstacles.map((o, i) => {
+      if (o.type !== 'person') return null;
+      let d = Infinity;
+      for (const smp of best.samples) d = Math.min(d, carToPersonHorizontalDistance2D(smp, prepared[i], smp.t));
+      return d < 5 ? `${o.id} ${o.label} (${Math.max(d, 0).toFixed(1)} m)` : null;
+    }).filter(Boolean);
+    const other = [...new Set(show.flatMap((e) => e.sim.checks.filter((c) => !c.pass && c.id !== 'pedestrian').map((c) => c.message)))].slice(0, 2);
+    const reasons = [...(tooClose.length ? [`within the 5 m thruster keep-out of ${tooClose.join(', ')}`] : []), ...other];
+    const reject_reason = `No safe route to (${target.forward}, ${target.right}) in ${found.tried} route shapes: ${reasons.join('; ')}.` +
+      (suggestion ? ` A safe landing exists ${suggestion.offset_m} m away at (${suggestion.forward}, ${suggestion.right}).` : '') +
+      (wait ? ` The people in the way will have moved on in about ${wait} s — wait, then hop.` : (blockedByMovers ? ' Waiting up to 20 s does not clear it.' : ''));
     return {
       verdict: 'REJECT',
       rounds: [{ n: 1, candidates: cands, decision: 'reject', chosen_id: null, why: null, revision_notes: null }],
       final_params: null, chosen_id: null, semantic_notes: [], reject_reason,
-      suggested_target: suggestion, disagreements: [], search: { tried: found.tried, safe: 0 },
+      suggested_target: suggestion, suggested_wait_s: wait ? waitS + wait : null, disagreements: [], search: { tried: found.tried, safe: 0 },
     };
   }
 
@@ -174,7 +218,7 @@ export async function planSearch({ siteId, site, target }, sse) {
   });
   const rounds = [];
   const safeCards = (cands) => cands.filter((c) => c.sim_verdict === 'SAFE').map((c) => card(c.id, c.label, entries.get(c.id), site));
-  const v1 = await judge({ siteId, site, target, cards: safeCards(cands1), round: 1, mustPick: false }, sse);
+  const v1 = await judge({ siteId, site, target, rig, cards: safeCards(cands1), round: 1, mustPick: false }, sse);
   let decision = v1;
   rounds.push({ n: 1, candidates: cands1, decision: v1.decision === 'revise' ? 'revise' : 'pick', chosen_id: v1.decision === 'revise' ? null : v1.chosen_id, why: v1.why, revision_notes: v1.decision === 'revise' ? v1.revised.map((r) => `${r.label}: ${r.reason}`).join(' · ') : null });
 
@@ -190,7 +234,7 @@ export async function planSearch({ siteId, site, target }, sse) {
     });
     const safe2 = cands2.filter((c) => c.sim_verdict === 'SAFE');
     sse.log(`simulator: ${safe2.length} of ${cands2.length} round-2 routes are SAFE`);
-    decision = await judge({ siteId, site, target, cards: safe2.length ? safeCards(cands2) : safeCards(cands1), round: 2, mustPick: true }, sse);
+    decision = await judge({ siteId, site, target, rig, cards: safe2.length ? safeCards(cands2) : safeCards(cands1), round: 2, mustPick: true }, sse);
     rounds.push({ n: 2, candidates: cands2, decision: 'pick', chosen_id: decision.chosen_id, why: decision.why, revision_notes: null });
   }
 
@@ -199,12 +243,16 @@ export async function planSearch({ siteId, site, target }, sse) {
   if (!chosen || chosen.sim.verdict !== 'SAFE') {
     const last = rounds.at(-1);
     last.decision = 'reject';
+    last.chosen_id = null;
     return { verdict: 'REJECT', rounds, final_params: null, chosen_id: null, semantic_notes: decision.semantic_notes ?? [],
       reject_reason: decision.why || 'Argon found no acceptable route among the simulator-SAFE ones.', disagreements: [], search: { tried: found.tried, safe: found.safe.length } };
   }
-  return {
-    verdict: 'SAFE', rounds, final_params: chosen.params, chosen_id: decision.chosen_id,
+  const out = {
+    verdict: 'SAFE', rounds, final_params: chosen.params, chosen_id: decision.chosen_id, wait_s: waitS || null,
     semantic_notes: decision.semantic_notes ?? [], reject_reason: null, disagreements: [],
     search: { tried: found.tried, safe: found.safe.length },
   };
+  const v = validateAgentResult(out);
+  if (!v.ok) sse.log(`Warning: search result validation: ${v.errors.join('; ')}`);
+  return out;
 }

@@ -10,17 +10,31 @@ let workers = null;
 let seq = 0;
 const pending = new Map();
 
+function spawnWorker(slot) {
+  const w = new Worker(new URL('./search-worker.js', import.meta.url), { execArgv: [] });
+  w.on('message', ({ id, out, error }) => {
+    const p = pending.get(id);
+    if (!p) return;
+    pending.delete(id);
+    error ? p.reject(new Error(error)) : p.resolve(out);
+  });
+  const failWorker = (err) => {
+    for (const [id, p] of pending.entries()) {
+      if (p.worker === w) {
+        pending.delete(id);
+        p.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+    if (workers && workers[slot] === w) workers[slot] = spawnWorker(slot);
+  };
+  w.on('error', failWorker);
+  w.on('exit', (code) => { if (code !== 0) failWorker(new Error(`search worker exited with code ${code}`)); });
+  return w;
+}
+
 function pool() {
   if (workers) return workers;
-  workers = Array.from({ length: SIZE }, () => {
-    const w = new Worker(new URL('./search-worker.js', import.meta.url), { execArgv: [] });
-    w.on('message', ({ id, out, error }) => {
-      const p = pending.get(id);
-      pending.delete(id);
-      error ? p.reject(new Error(error)) : p.resolve(out);
-    });
-    return w;
-  });
+  workers = Array.from({ length: SIZE }, (_, i) => spawnWorker(i));
   return workers;
 }
 
@@ -30,8 +44,9 @@ async function runChunks(kind, site, items, shapes) {
   items.forEach((it, i) => chunks[i % ws.length].push(it));
   const parts = await Promise.all(chunks.map((chunk, i) => chunk.length && new Promise((resolve, reject) => {
     const id = ++seq;
-    pending.set(id, { resolve, reject });
-    ws[i].postMessage({ id, kind, site, items: chunk, shapes });
+    const w = ws[i];
+    pending.set(id, { resolve, reject, worker: w });
+    w.postMessage({ id, kind, site, items: chunk, shapes });
   })));
   return parts.filter(Boolean).flat();
 }
@@ -44,6 +59,33 @@ export async function searchRoutesParallel(site, target) {
     .sort((a, b) => a.sim.failures.length - b.sim.failures.length || b.margins.air_remaining_kg - a.margins.air_remaining_kg)
     .slice(0, 8);
   return { safe, near, tried: all.length };
+}
+
+// Local refinement: coarse grids miss the best routes (agent mode found 1.00 m
+// clearance where the grid's best was 0.69 m). Hill-climb from the top SAFE
+// routes with small parameter nudges, keeping SAFE results only.
+const NUDGES = { apex_height_m: 0.6, duration_s: 0.3, side_bow_m: 1.5, climb_bias: 0.06, horizontal_delay: 0.05, vertical_drop: 0.08 };
+const BOUNDS = { apex_height_m: [0.5, 20], duration_s: [1, 8], side_bow_m: [-15, 15], climb_bias: [0.25, 0.75], horizontal_delay: [0, 0.4], vertical_drop: [0, 0.4] };
+export const routeScore = (m) => Math.min(m.min_clearance_m ?? 0, 2) + 0.01 * (m.air_remaining_kg ?? 0) + 0.05 * Math.min(Math.max((m.min_person_m ?? 99) - 5, 0), 5);
+
+export async function refineSafe(site, safe, { seeds = 3, iters = 3 } = {}) {
+  const all = [...safe];
+  const key = (p) => Object.keys(NUDGES).map((k) => (+p[k]).toFixed(3)).join('|');
+  const seen = new Set(all.map((e) => key(e.params)));
+  let frontier = [...safe].sort((a, b) => routeScore(b.margins) - routeScore(a.margins)).slice(0, seeds);
+  for (let it = 0; it < iters && frontier.length; it++) {
+    const cand = [];
+    for (const e of frontier) for (const [k, d] of Object.entries(NUDGES)) for (const sgn of [-1, 1]) {
+      const p = { ...e.params, [k]: Math.min(BOUNDS[k][1], Math.max(BOUNDS[k][0], +(e.params[k] + sgn * d).toFixed(3))) };
+      const kk = key(p);
+      if (!seen.has(kk)) { seen.add(kk); cand.push(p); }
+    }
+    const res = (await simulateMany(site, cand)).filter((e) => e.sim.verdict === 'SAFE');
+    all.push(...res);
+    const best = Math.max(...frontier.map((e) => routeScore(e.margins)));
+    frontier = res.filter((e) => routeScore(e.margins) > best - 1e-6).sort((a, b) => routeScore(b.margins) - routeScore(a.margins)).slice(0, seeds);
+  }
+  return all;
 }
 
 // Simulate explicit params in parallel → [{params, sim, margins}].

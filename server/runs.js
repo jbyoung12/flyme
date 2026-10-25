@@ -48,6 +48,43 @@ export function latestRun(siteId, re) {
   return names.at(-1) ?? null;
 }
 
+// Pick the best cached plan-<ts>.events.jsonl to replay for `siteId` and optional `target`:
+// prefers completed runs (with a matching .result.json) and, when `target` is given,
+// picks the run whose target is closest (within 6 m) so both SAFE and REJECT demo beats replay accurately.
+export function bestPlanReplay(siteId, target) {
+  const dir = runDir(siteId, false);
+  if (!fs.existsSync(dir)) return null;
+  const all = fs.readdirSync(dir)
+    .filter((n) => /^plan-\d+\.events\.jsonl$/.test(n))
+    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  if (!all.length) return null;
+
+  const completed = [];
+  for (const evName of all) {
+    const resName = evName.replace(/\.events\.jsonl$/, '.result.json');
+    const resObj = readRun(siteId, resName);
+    if (!resObj) continue;
+    const t = resObj.final_params?.target ?? resObj.rounds?.[0]?.candidates?.[0]?.params?.target ?? null;
+    completed.push({ evName, target: t });
+  }
+  if (!completed.length) return all.at(-1);
+
+  if (target && Number.isFinite(target.forward) && Number.isFinite(target.right)) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const c of completed) {
+      if (!c.target) continue;
+      const d = Math.hypot(c.target.forward - target.forward, c.target.right - target.right);
+      if (d <= 6 && d <= bestDist + 0.25) {
+        best = c.evName;
+        bestDist = d;
+      }
+    }
+    if (best) return best;
+  }
+  return completed.at(-1).evName;
+}
+
 // Latest known site.json for a site: newest runs/<id>/site.r<N>.json, else the
 // fixture with that id, else null.
 export function latestSite(siteId) {

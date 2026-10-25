@@ -77,6 +77,8 @@ function ensureModal() {
   return modal;
 }
 
+let prevRenderBlobUrl = null;
+
 export async function openVideoPanel({ siteId, site, chosen, recordHop, log } = {}) {
   const modal = ensureModal();
   modal.style.display = 'flex';
@@ -107,13 +109,15 @@ export async function openVideoPanel({ siteId, site, chosen, recordHop, log } = 
     if (typeof recordHop === 'function') {
       const blob = await recordHop();
       if (blob && blob.size > 0) {
-        renderVid.src = URL.createObjectURL(blob);
+        if (prevRenderBlobUrl) URL.revokeObjectURL(prevRenderBlobUrl);
+        prevRenderBlobUrl = URL.createObjectURL(blob);
+        renderVid.src = prevRenderBlobUrl;
         renderVid.play().catch(() => {});
         clipDataUrl = await blobToDataUrl(blob);
       }
     }
 
-    setStatus('Submitting clip + keyframe toPOST /api/video (gemini-omni-1.1-flash)…');
+    setStatus('Submitting clip + keyframe to POST /api/video (gemini-omni-1.1-flash)…');
     log?.('video: starting Gemini Omni photoreal generation job…');
 
     const startRes = await fetch('/api/video', {
