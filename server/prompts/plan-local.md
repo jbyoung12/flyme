@@ -41,6 +41,7 @@ Each candidate specifies:
   - `0.34–0.40` climbs early (great for clearing a parked vehicle in front of the starting spot).
   - `0.45–0.50` is a symmetric arc.
 - `horizontal_delay` ∈ `[0, 0.4]`: fraction of flight spent rising vertically before accelerating forward (`0.08–0.15` helps clear close obstacles in front of the car, while `0–0.04` minimizes horizontal thrust and saves 15–25 kg of air on longer hops).
+- `vertical_drop` ∈ `[0, 0.4]` (optional, default 0): final fraction of the flight that is a **pure vertical descent** — all sideways motion and bow finish first, then the car drops straight down. Use it (0.2–0.35, with `climb_bias` 0.55–0.75 so the car is still high when sideways motion ends) to fly **over** a wire, shelter, or car and then descend straight into a gap or a spot right next to an obstacle, instead of gliding in at an angle.
 
 ### How to Fix Specific Simulator Failures Across Rounds
 - **`air_reserve` failed (`remaining_kg < 25`):**

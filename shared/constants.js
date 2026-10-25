@@ -79,6 +79,7 @@ export const PARAM_BOUNDS = {
   side_bow_m: [-15, 15],
   climb_bias: [0.25, 0.75],
   horizontal_delay: [0, 0.4],
+  vertical_drop: [0, 0.4], // optional, default 0: final fraction spent descending straight down
 };
 
 // Naive baseline params (eval mode (c)); target filled in by the caller.
@@ -88,6 +89,7 @@ export const DEFAULT_PARAMS = {
   side_bow_m: 0,
   climb_bias: 0.4,
   horizontal_delay: 0.1,
+  vertical_drop: 0,
 };
 
 // Default camera rig when sites/<id>/rig.json is absent (§6.2).

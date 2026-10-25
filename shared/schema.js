@@ -117,6 +117,9 @@ export function normalizeSite(site) {
 
 // ---------------------------------------------------------------- params (§6.4)
 
+// Params that may be omitted (added after the first contract), with defaults.
+export const OPTIONAL_PARAMS = { vertical_drop: 0 };
+
 // Clamp shape params into PARAM_BOUNDS. target is passed through untouched
 // (the agent may not move it). Returns { params, violations, errors };
 // errors are non-recoverable (missing target / non-numeric fields).
@@ -131,7 +134,7 @@ export function clampParams(input) {
     params.target = { forward: input.target.forward, right: input.target.right };
   }
   for (const [k, [lo, hi]] of Object.entries(PARAM_BOUNDS)) {
-    const v = input[k];
+    const v = input[k] ?? OPTIONAL_PARAMS[k];
     if (!isNum(v)) { errors.push(`params.${k}: expected finite number`); continue; }
     const c = Math.min(hi, Math.max(lo, v));
     if (c !== v) violations.push({ field: k, value: v, clamped: c, bounds: [lo, hi] });
@@ -351,6 +354,7 @@ export const PARAMS_JSON_SCHEMA = {
     side_bow_m: { type: 'number' },
     climb_bias: { type: 'number' },
     horizontal_delay: { type: 'number' },
+    vertical_drop: { type: 'number' },
   },
   required: ['target', ...Object.keys(PARAM_BOUNDS)],
 };

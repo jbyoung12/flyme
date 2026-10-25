@@ -7,7 +7,7 @@
 const RAD = Math.PI / 180;
 const MAX_RANGE_M = 40; // beyond this the ground-plane ray is too flat to trust
 const MIN_BELOW_HORIZON = 0.035; // closer to the horizon (≳ 25 m) a 0.01 pixel error is metres
-const MAX_ANCHOR_SPAN_M = 6; // long objects (bike rows, platforms) have no single contact point
+const MAX_ANCHOR_SPAN_M = 6; // longer boxes only use the anchor for their near face (anchorFace)
 
 // Pixel (x, y ∈ [0,1], y down) → ground point {forward, right, dist} or null.
 // Pitch comes from the observed horizon when given (handheld tilt), else the
@@ -44,6 +44,30 @@ function halfDepth(o, bearing) {
   return 0;
 }
 
+// Long boxes (shelters, bike rows, platforms): the anchor lies on the face
+// toward the camera, which fixes the box's offset along that face's normal
+// only; the position along the face keeps the model's estimate.
+function anchorFace(o, g) {
+  const h = (o.heading_deg ?? 0) * RAD;
+  const axes = [
+    { dir: [Math.cos(h), Math.sin(h)], half: o.size.length / 2 }, // along heading
+    { dir: [-Math.sin(h), Math.cos(h)], half: o.size.width / 2 },
+  ];
+  const ray = [Math.cos(g.bearing), Math.sin(g.bearing)];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+  const [n, other] = Math.abs(dot(ray, axes[0].dir)) > Math.abs(dot(ray, axes[1].dir)) ? axes : [axes[1], axes[0]];
+  const sign = Math.sign(dot(ray, n.dir)) || 1; // face normal points back toward the camera
+  const nDir = [n.dir[0] * sign, n.dir[1] * sign];
+  const c = [o.center.forward, o.center.right];
+  const along = dot(c, other.dir);
+  const across = dot([g.forward, g.right], nDir) + n.half;
+  const center = {
+    forward: +(along * other.dir[0] + across * nDir[0]).toFixed(2),
+    right: +(along * other.dir[1] + across * nDir[1]).toFixed(2),
+  };
+  return { ...o, center, center_model: o.center, center_source: 'anchor_face' };
+}
+
 // Returns a corrected copy of `o` (center from its anchor) or `o` unchanged.
 // Moving objects keep the model's center: the keyframe is mid-clip, while
 // their center is defined at the end of the clip (D20).
@@ -52,11 +76,13 @@ function halfDepth(o, bearing) {
 export function anchorObstacle(o, rig, horizons = {}, clips = null) {
   const a = o.anchor;
   if (!a || o.shape === 'wire' || (o.base_up ?? 0) > 0.3) return o;
-  if (o.shape === 'box' && Math.max(o.size?.length ?? 0, o.size?.width ?? 0) > MAX_ANCHOR_SPAN_M) return o;
+  const long = o.shape === 'box' && Math.max(o.size?.length ?? 0, o.size?.width ?? 0) > MAX_ANCHOR_SPAN_M;
+  if (long && o.velocity) return o;
   const cam = rig.cameras.find((c) => c.id === a.camera);
   if (!cam || !Number.isFinite(a.x) || !Number.isFinite(a.y)) return o;
   const g = groundPoint(cam, rig.aspect ?? 16 / 9, a.x, a.y, horizons[cam.id]);
   if (!g) return o;
+  if (long) return anchorFace(o, g);
   const hd = halfDepth(o, g.bearing);
   let forward = g.forward + hd * Math.cos(g.bearing);
   let right = g.right + hd * Math.sin(g.bearing);
