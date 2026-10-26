@@ -298,7 +298,7 @@ async function scan() {
     for (let round = 1; round <= MAX_CRITIQUE_ROUNDS; round++) {
       status(`Loop 1 · round ${round}: rendering ${S.rig.cameras.length} camera views`);
       const renders = refreshRenders();
-      await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => setTimeout(r, 0));
       status(`Loop 1 · round ${round}: Argon compares renders with footage`);
       let events, mocked;
       try {
